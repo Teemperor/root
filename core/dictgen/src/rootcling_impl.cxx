@@ -1045,7 +1045,7 @@ string GetNonConstMemberName(const clang::FieldDecl &m, const string &prefix = "
 
 int STLContainerStreamer(const clang::FieldDecl &m,
                          int rwmode,
-                         const cling::Interpreter &interp,
+                         const ROOT::TMetaUtils::InterpreterInternals &interp,
                          const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
                          std::ostream &dictStream)
 {
@@ -1581,7 +1581,7 @@ llvm::StringRef GrabIndex(const clang::FieldDecl &member, int printError)
 ////////////////////////////////////////////////////////////////////////////////
 
 void WriteStreamer(const ROOT::TMetaUtils::AnnotatedRecordDecl &cl,
-                   const cling::Interpreter &interp,
+                   const ROOT::TMetaUtils::InterpreterInternals &interp,
                    const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
                    std::ostream &dictStream)
 {
@@ -1972,7 +1972,7 @@ void WriteStreamer(const ROOT::TMetaUtils::AnnotatedRecordDecl &cl,
 ////////////////////////////////////////////////////////////////////////////////
 
 void WriteAutoStreamer(const ROOT::TMetaUtils::AnnotatedRecordDecl &cl,
-                       const cling::Interpreter &interp,
+                       const ROOT::TMetaUtils::InterpreterInternals &interp,
                        const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
                        std::ostream &dictStream)
 {
@@ -2024,7 +2024,7 @@ void WriteAutoStreamer(const ROOT::TMetaUtils::AnnotatedRecordDecl &cl,
 ////////////////////////////////////////////////////////////////////////////////
 
 void CallWriteStreamer(const ROOT::TMetaUtils::AnnotatedRecordDecl &cl,
-                       const cling::Interpreter &interp,
+                       const ROOT::TMetaUtils::InterpreterInternals &interp,
                        const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
                        std::ostream &dictStream,
                        bool isAutoStreamer)
@@ -2255,14 +2255,14 @@ namespace {
     ScannerConsumer(clang::CompilerInstance& CI) : Instance(&CI) {}
     virtual void HandleTranslationUnit(ASTContext &Ctx) override {
       clang::Sema &Sema = Instance->getSema();
-
+ /*
       RScanner scan(selectionRules,
                     scanType,
                     interp,
                     normCtxt,
                     scannerVerbLevel);
       scan.Scan(Ctx);
-      AnnotateAllDeclsForPCH(Sema, *gModuleScanner);
+      AnnotateAllDeclsForPCH(Sema, *gModuleScanner); */
     }
   };
 
@@ -5057,11 +5057,9 @@ int RootClingMain(int argc,
 
    RScanner scan(selectionRules,
                  scanType,
-                 interp,
+                 interp.getSema(),
                  normCtxt,
                  scannerVerbLevel);
-
-   gModuleScanner = &scan;
 
    // If needed initialize the autoloading hook
    if (liblistPrefix.length()) {

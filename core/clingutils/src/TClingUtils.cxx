@@ -83,17 +83,46 @@ public:
    void keepTypedef(const cling::LookupHelper &lh, const char* name,
                     bool replace = false);
 };
+
 }
+}
+
+namespace ROOT {
+   namespace TMetaUtils {
+      InterpreterInternals::InterpreterInternals(const cling::Interpreter &interp) : interp(&interp), Sema(interp.getSema()) {
+      }
+
+      clang::ASTContext &InterpreterInternals::getASTContext() const {
+        return getSema().getASTContext();
+      }
+
+      cling::LookupHelper &InterpreterInternals::getLookupHelper() const {
+        return getInterpreter().getLookupHelper();
+      }
+
+   }
+}
+
+namespace {
+  class PushTransactionRAIIWrapper {
+    std::unique_ptr<cling::Interpreter::PushTransactionRAII> RAII;
+  public:
+    PushTransactionRAIIWrapper(const ROOT::TMetaUtils::InterpreterInternals& II) {
+      if (II.hasInterpreter()) {
+        RAII.reset(new cling::Interpreter::PushTransactionRAII(&II.getInterpreter()));
+      }
+    }
+  };
 }
 
 namespace {
 
-////////////////////////////////////////////////////////////////////////////////
+  ////////////////////////////////////////////////////////////////////////////////
 /// Add default parameter to the scope if needed.
 
 static clang::NestedNameSpecifier* AddDefaultParametersNNS(const clang::ASTContext& Ctx,
                                                            clang::NestedNameSpecifier* scope,
-                                                           const cling::Interpreter &interpreter,
+                                                           const ROOT::TMetaUtils::InterpreterInternals &interpreter,
                                                            const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt) {
    if (!scope) return 0;
 
@@ -360,7 +389,7 @@ AnnotatedRecordDecl::AnnotatedRecordDecl(long index,
                                          bool rRequestNoInputOperator,
                                          bool rRequestOnlyTClass,
                                          int rRequestedVersionNumber,
-                                         const cling::Interpreter &interpreter,
+                                         clang::Sema &interpreter,
                                          const TNormalizedCtxt &normCtxt) :
    fRuleIndex(index), fDecl(decl), fRequestStreamerInfo(rStreamerInfo), fRequestNoStreamer(rNoStreamer),
    fRequestNoInputOperator(rRequestNoInputOperator), fRequestOnlyTClass(rRequestOnlyTClass), fRequestedVersionNumber(rRequestedVersionNumber)
@@ -382,7 +411,7 @@ AnnotatedRecordDecl::AnnotatedRecordDecl(long index,
                                          bool rRequestNoInputOperator,
                                          bool rRequestOnlyTClass,
                                          int rRequestVersionNumber,
-                                         const cling::Interpreter &interpreter,
+                                         clang::Sema &interpreter,
                                          const TNormalizedCtxt &normCtxt) :
    fRuleIndex(index), fDecl(decl), fRequestedName(""), fRequestStreamerInfo(rStreamerInfo), fRequestNoStreamer(rNoStreamer),
    fRequestNoInputOperator(rRequestNoInputOperator), fRequestOnlyTClass(rRequestOnlyTClass), fRequestedVersionNumber(rRequestVersionNumber)
@@ -410,7 +439,7 @@ AnnotatedRecordDecl::AnnotatedRecordDecl(long index,
                                          bool rRequestNoInputOperator,
                                          bool rRequestOnlyTClass,
                                          int rRequestVersionNumber,
-                                         const cling::Interpreter &interpreter,
+                                         clang::Sema &interpreter,
                                          const TNormalizedCtxt &normCtxt) :
    fRuleIndex(index), fDecl(decl), fRequestedName(""), fRequestStreamerInfo(rStreamerInfo), fRequestNoStreamer(rNoStreamer),
    fRequestNoInputOperator(rRequestNoInputOperator), fRequestOnlyTClass(rRequestOnlyTClass), fRequestedVersionNumber(rRequestVersionNumber)
@@ -433,7 +462,7 @@ AnnotatedRecordDecl::AnnotatedRecordDecl(long index,
                                          bool rRequestNoInputOperator,
                                          bool rRequestOnlyTClass,
                                          int rRequestVersionNumber,
-                                         const cling::Interpreter &interpreter,
+                                         clang::Sema &interpreter,
                                          const TNormalizedCtxt &normCtxt) :
    fRuleIndex(index), fDecl(decl), fRequestedName(""), fRequestStreamerInfo(rStreamerInfo), fRequestNoStreamer(rNoStreamer), fRequestNoInputOperator(rRequestNoInputOperator), fRequestOnlyTClass(rRequestOnlyTClass), fRequestedVersionNumber(rRequestVersionNumber)
 {
@@ -684,7 +713,7 @@ inline bool IsTemplate(const clang::Decl &cl)
 ////////////////////////////////////////////////////////////////////////////////
 
 const clang::FunctionDecl* ROOT::TMetaUtils::ClassInfo__HasMethod(const clang::DeclContext *cl, const char* name,
-                                                            const cling::Interpreter& interp)
+                                                            const InterpreterInternals &interp)
 {
    clang::Sema* S = &interp.getSema();
    const clang::NamedDecl* ND = cling::utils::Lookup::Named(S, name, cl);
@@ -697,7 +726,7 @@ const clang::FunctionDecl* ROOT::TMetaUtils::ClassInfo__HasMethod(const clang::D
 /// Return the scope corresponding to 'name' or std::'name'
 
 const clang::CXXRecordDecl *
-ROOT::TMetaUtils::ScopeSearch(const char *name, const cling::Interpreter &interp,
+ROOT::TMetaUtils::ScopeSearch(const char *name, const InterpreterInternals &interp,
                               bool /*diagnose*/, const clang::Type** resultType)
 {
    const cling::LookupHelper& lh = interp.getLookupHelper();
@@ -720,7 +749,7 @@ ROOT::TMetaUtils::ScopeSearch(const char *name, const cling::Interpreter &interp
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ROOT::TMetaUtils::RequireCompleteType(const cling::Interpreter &interp, const clang::CXXRecordDecl *cl)
+bool ROOT::TMetaUtils::RequireCompleteType(const InterpreterInternals &interp, const clang::CXXRecordDecl *cl)
 {
    clang::QualType qType(cl->getTypeForDecl(),0);
    return RequireCompleteType(interp,cl->getLocation(),qType);
@@ -728,19 +757,19 @@ bool ROOT::TMetaUtils::RequireCompleteType(const cling::Interpreter &interp, con
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ROOT::TMetaUtils::RequireCompleteType(const cling::Interpreter &interp, clang::SourceLocation Loc, clang::QualType Type)
+bool ROOT::TMetaUtils::RequireCompleteType(const InterpreterInternals &interp, clang::SourceLocation Loc, clang::QualType Type)
 {
-   clang::Sema& S = interp.getCI()->getSema();
+   clang::Sema& S = interp.getSema();
    // Here we might not have an active transaction to handle
    // the caused instantiation decl.
-   cling::Interpreter::PushTransactionRAII RAII(const_cast<cling::Interpreter*>(&interp));
+   PushTransactionRAIIWrapper clingRAII(interp);
    return S.RequireCompleteType(Loc, Type, clang::diag::err_incomplete_type);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 bool ROOT::TMetaUtils::IsBase(const clang::CXXRecordDecl *cl, const clang::CXXRecordDecl *base,
-                              const clang::CXXRecordDecl *context, const cling::Interpreter &interp)
+                              const clang::CXXRecordDecl *context, const InterpreterInternals &interp)
 {
    if (!cl || !base) {
       return false;
@@ -763,7 +792,7 @@ bool ROOT::TMetaUtils::IsBase(const clang::CXXRecordDecl *cl, const clang::CXXRe
 
 ////////////////////////////////////////////////////////////////////////////////
 
-bool ROOT::TMetaUtils::IsBase(const clang::FieldDecl &m, const char* basename, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::IsBase(const clang::FieldDecl &m, const char* basename, const InterpreterInternals &interp)
 {
    const clang::CXXRecordDecl* CRD = llvm::dyn_cast<clang::CXXRecordDecl>(ROOT::TMetaUtils::GetUnderlyingRecordDecl(m.getType()));
    if (!CRD) {
@@ -785,8 +814,8 @@ bool ROOT::TMetaUtils::IsBase(const clang::FieldDecl &m, const char* basename, c
 int ROOT::TMetaUtils::ElementStreamer(std::ostream& finalString,
                                       const clang::NamedDecl &forcontext,
                                       const clang::QualType &qti,
-                                      const char *R__t,int rwmode,
-                                      const cling::Interpreter &interp,
+                                      const char *R__t, int rwmode,
+                                      const InterpreterInternals &interp,
                                       const char *tcl)
 {
    static const clang::CXXRecordDecl *TObject_decl
@@ -962,7 +991,7 @@ int ROOT::TMetaUtils::ElementStreamer(std::ostream& finalString,
 
 ROOT::TMetaUtils::EIOCtorCategory ROOT::TMetaUtils::CheckConstructor(const clang::CXXRecordDecl *cl,
                                                                      const RConstructorType &ioctortype,
-                                                                     const cling::Interpreter& interpreter)
+                                                                     const InterpreterInternals &interpreter)
 {
    const char *arg = ioctortype.GetName();
 
@@ -971,9 +1000,9 @@ ROOT::TMetaUtils::EIOCtorCategory ROOT::TMetaUtils::CheckConstructor(const clang
       clang::CXXRecordDecl* ncCl = const_cast<clang::CXXRecordDecl*>(cl);
 
       // We may induce template instantiation
-      cling::Interpreter::PushTransactionRAII clingRAII(const_cast<cling::Interpreter*>(&interpreter));
+      PushTransactionRAIIWrapper clingRAII(interpreter);
 
-      if (auto* Ctor = interpreter.getCI()->getSema().LookupDefaultConstructor(ncCl)) {
+      if (auto* Ctor = interpreter.getSema().LookupDefaultConstructor(ncCl)) {
          if (Ctor->getAccess() == clang::AS_public) {
             return EIOCtorCategory::kDefault;
          }
@@ -1029,7 +1058,7 @@ ROOT::TMetaUtils::EIOCtorCategory ROOT::TMetaUtils::CheckConstructor(const clang
 
 const clang::CXXMethodDecl *GetMethodWithProto(const clang::Decl* cinfo,
                                                const char *method, const char *proto,
-                                               const cling::Interpreter &interp,
+                                               const ROOT::TMetaUtils::InterpreterInternals &interp,
                                                bool diagnose)
 {
    const clang::FunctionDecl* funcD
@@ -1068,7 +1097,7 @@ namespace ROOT {
 bool ROOT::TMetaUtils::HasIOConstructor(const clang::CXXRecordDecl *cl,
                                         std::string& arg,
                                         const RConstructorTypes& ctorTypes,
-                                        const cling::Interpreter &interp)
+                                        const InterpreterInternals &interp)
 {
    if (cl->isAbstract()) return false;
 
@@ -1134,7 +1163,7 @@ bool ROOT::TMetaUtils::NeedDestructor(const clang::CXXRecordDecl *cl)
 bool ROOT::TMetaUtils::CheckPublicFuncWithProto(const clang::CXXRecordDecl *cl,
                                                 const char *methodname,
                                                 const char *proto,
-                                                const cling::Interpreter &interp,
+                                                const InterpreterInternals &interp,
                                                 bool diagnose)
 {
    const clang::CXXMethodDecl *method
@@ -1147,7 +1176,7 @@ bool ROOT::TMetaUtils::CheckPublicFuncWithProto(const clang::CXXRecordDecl *cl,
 ////////////////////////////////////////////////////////////////////////////////
 /// Return true if the class has a method DirectoryAutoAdd(TDirectory *)
 
-bool ROOT::TMetaUtils::HasDirectoryAutoAdd(const clang::CXXRecordDecl *cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasDirectoryAutoAdd(const clang::CXXRecordDecl *cl, const InterpreterInternals &interp)
 {
    // Detect if the class has a DirectoryAutoAdd
 
@@ -1162,7 +1191,7 @@ bool ROOT::TMetaUtils::HasDirectoryAutoAdd(const clang::CXXRecordDecl *cl, const
 ////////////////////////////////////////////////////////////////////////////////
 /// Return true if the class has a method Merge(TCollection*,TFileMergeInfo*)
 
-bool ROOT::TMetaUtils::HasNewMerge(const clang::CXXRecordDecl *cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasNewMerge(const clang::CXXRecordDecl *cl, const InterpreterInternals &interp)
 {
    // Detect if the class has a 'new' Merge function.
 
@@ -1176,7 +1205,7 @@ bool ROOT::TMetaUtils::HasNewMerge(const clang::CXXRecordDecl *cl, const cling::
 ////////////////////////////////////////////////////////////////////////////////
 /// Return true if the class has a method Merge(TCollection*)
 
-bool ROOT::TMetaUtils::HasOldMerge(const clang::CXXRecordDecl *cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasOldMerge(const clang::CXXRecordDecl *cl, const InterpreterInternals &interp)
 {
    // Detect if the class has an old fashion Merge function.
 
@@ -1191,7 +1220,7 @@ bool ROOT::TMetaUtils::HasOldMerge(const clang::CXXRecordDecl *cl, const cling::
 ////////////////////////////////////////////////////////////////////////////////
 /// Return true if the class has a method ResetAfterMerge(TFileMergeInfo *)
 
-bool ROOT::TMetaUtils::HasResetAfterMerge(const clang::CXXRecordDecl *cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasResetAfterMerge(const clang::CXXRecordDecl *cl, const InterpreterInternals &interp)
 {
    // Detect if the class has a 'new' Merge function.
    // bool hasMethod = cl.HasMethod("DirectoryAutoAdd");
@@ -1209,7 +1238,7 @@ bool ROOT::TMetaUtils::HasResetAfterMerge(const clang::CXXRecordDecl *cl, const 
 
 bool ROOT::TMetaUtils::HasCustomStreamerMemberFunction(const AnnotatedRecordDecl &cl,
                                                        const clang::CXXRecordDecl* clxx,
-                                                       const cling::Interpreter &interp,
+                                                       const InterpreterInternals &interp,
                                                        const TNormalizedCtxt &normCtxt)
 {
    static const char *proto = "TBuffer&";
@@ -1228,7 +1257,7 @@ bool ROOT::TMetaUtils::HasCustomStreamerMemberFunction(const AnnotatedRecordDecl
 
 bool ROOT::TMetaUtils::HasCustomConvStreamerMemberFunction(const AnnotatedRecordDecl &cl,
                                                            const clang::CXXRecordDecl* clxx,
-                                                           const cling::Interpreter &interp,
+                                                           const InterpreterInternals &interp,
                                                            const TNormalizedCtxt &normCtxt)
 {
    static const char *proto = "TBuffer&,TClass*";
@@ -1408,7 +1437,7 @@ void ROOT::TMetaUtils::CreateNameTypeMap(const clang::CXXRecordDecl &cl, ROOT::M
 const clang::FunctionDecl *ROOT::TMetaUtils::GetFuncWithProto(const clang::Decl* cinfo,
                                                               const char *method,
                                                               const char *proto,
-                                                              const cling::Interpreter &interp,
+                                                              const InterpreterInternals &interp,
                                                               bool diagnose)
 {
    return interp.getLookupHelper().findFunctionProto(cinfo, method, proto,
@@ -1524,7 +1553,7 @@ bool ROOT::TMetaUtils::hasOpaqueTypedef(clang::QualType instanceType, const ROOT
 /// Return true if any of the argument is or contains a double32.
 
 bool ROOT::TMetaUtils::hasOpaqueTypedef(const AnnotatedRecordDecl &cl,
-                                        const cling::Interpreter &interp,
+                                        const InterpreterInternals &interp,
                                         const TNormalizedCtxt &normCtxt)
 {
    const clang::CXXRecordDecl* clxx =  llvm::dyn_cast<clang::CXXRecordDecl>(cl.GetRecordDecl());
@@ -1632,7 +1661,7 @@ bool ROOT::TMetaUtils::ExtractAttrIntPropertyFromName(const clang::Decl& decl,
 void ROOT::TMetaUtils::WriteClassInit(std::ostream& finalString,
                                       const AnnotatedRecordDecl &cl,
                                       const clang::CXXRecordDecl *decl,
-                                      const cling::Interpreter &interp,
+                                      const InterpreterInternals &interp,
                                       const TNormalizedCtxt &normCtxt,
                                       const RConstructorTypes& ctorTypes,
                                       bool& needCollectionProxy)
@@ -2182,7 +2211,7 @@ bool ROOT::TMetaUtils::NeedTemplateKeyword(const clang::CXXRecordDecl *cl)
 ////////////////////////////////////////////////////////////////////////////////
 /// return true if we can find a custom operator new with placement
 
-bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const char *which, const clang::RecordDecl &cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const char *which, const clang::RecordDecl &cl, const InterpreterInternals &interp)
 {
    const char *name = which;
    const char *proto = "size_t";
@@ -2262,7 +2291,7 @@ bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const char *which, const cl
 ////////////////////////////////////////////////////////////////////////////////
 /// return true if we can find a custom operator new with placement
 
-bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const clang::RecordDecl &cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const clang::RecordDecl &cl, const InterpreterInternals &interp)
 {
    return HasCustomOperatorNewPlacement("operator new",cl, interp);
 }
@@ -2270,7 +2299,7 @@ bool ROOT::TMetaUtils::HasCustomOperatorNewPlacement(const clang::RecordDecl &cl
 ////////////////////////////////////////////////////////////////////////////////
 /// return true if we can find a custom operator new with placement
 
-bool ROOT::TMetaUtils::HasCustomOperatorNewArrayPlacement(const clang::RecordDecl &cl, const cling::Interpreter &interp)
+bool ROOT::TMetaUtils::HasCustomOperatorNewArrayPlacement(const clang::RecordDecl &cl, const InterpreterInternals &interp)
 {
    return HasCustomOperatorNewPlacement("operator new[]",cl, interp);
 }
@@ -2282,7 +2311,7 @@ bool ROOT::TMetaUtils::HasCustomOperatorNewArrayPlacement(const clang::RecordDec
 void ROOT::TMetaUtils::WriteAuxFunctions(std::ostream& finalString,
                                          const AnnotatedRecordDecl &cl,
                                          const clang::CXXRecordDecl *decl,
-                                         const cling::Interpreter &interp,
+                                         const InterpreterInternals &interp,
                                          const RConstructorTypes& ctorTypes,
                                          const TNormalizedCtxt &normCtxt)
 {
@@ -2387,7 +2416,7 @@ void ROOT::TMetaUtils::WriteAuxFunctions(std::ostream& finalString,
 /// Write interface function for STL members
 
 void ROOT::TMetaUtils::WritePointersSTL(const AnnotatedRecordDecl &cl,
-                                        const cling::Interpreter &interp,
+                                        const InterpreterInternals &interp,
                                         const TNormalizedCtxt &normCtxt)
 {
    std::string a;
@@ -2459,7 +2488,7 @@ std::string ROOT::TMetaUtils::TrueName(const clang::FieldDecl &m)
 /// Return the version number of the class or -1
 /// if the function Class_Version does not exist.
 
-int ROOT::TMetaUtils::GetClassVersion(const clang::RecordDecl *cl, const cling::Interpreter& interp)
+int ROOT::TMetaUtils::GetClassVersion(const clang::RecordDecl *cl, const InterpreterInternals &interp)
 {
    const clang::CXXRecordDecl* CRD = llvm::dyn_cast<clang::CXXRecordDecl>(cl);
    if (!CRD) {
@@ -2572,7 +2601,7 @@ const char *ROOT::TMetaUtils::ShortTypeName(const char *typeDesc)
 }
 
 bool ROOT::TMetaUtils::IsStreamableObject(const clang::FieldDecl &m,
-                                          const cling::Interpreter& interp)
+                                          const InterpreterInternals &interp)
 {
    const char *comment = ROOT::TMetaUtils::GetComment( m ).data();
 
@@ -2664,7 +2693,7 @@ clang::RecordDecl *ROOT::TMetaUtils::GetUnderlyingRecordDecl(clang::QualType typ
 
 void ROOT::TMetaUtils::WriteClassCode(CallWriteStreamer_t WriteStreamerFunc,
                                       const AnnotatedRecordDecl &cl,
-                                      const cling::Interpreter &interp,
+                                      const InterpreterInternals &interp,
                                       const TNormalizedCtxt &normCtxt,
                                       std::ostream& dictStream,
                                       const RConstructorTypes& ctorTypes,
@@ -2712,10 +2741,10 @@ void ROOT::TMetaUtils::WriteClassCode(CallWriteStreamer_t WriteStreamerFunc,
 /// and whether they (should) affect the on disk layout (for STL containers, we do know they do not).
 
 clang::QualType ROOT::TMetaUtils::AddDefaultParameters(clang::QualType instanceType,
-                                                       const cling::Interpreter &interpreter,
+                                                       const InterpreterInternals &interpreter,
                                                        const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt)
 {
-   const clang::ASTContext& Ctx = interpreter.getCI()->getASTContext();
+   const clang::ASTContext& Ctx = interpreter.getASTContext();
 
    clang::QualType originalType = instanceType;
 
@@ -2788,7 +2817,7 @@ clang::QualType ROOT::TMetaUtils::AddDefaultParameters(clang::QualType instanceT
    bool mightHaveChanged = false;
    if (TST && TSTdecl) {
 
-      clang::Sema& S = interpreter.getCI()->getSema();
+      clang::Sema& S = interpreter.getSema();
       clang::TemplateDecl *Template = TSTdecl->getSpecializedTemplate()->getMostRecentDecl();
       clang::TemplateParameterList *Params = Template->getTemplateParameters();
       clang::TemplateParameterList::iterator Param = Params->begin(); // , ParamEnd = Params->end();
@@ -2872,7 +2901,7 @@ clang::QualType ROOT::TMetaUtils::AddDefaultParameters(clang::QualType instanceT
             clang::TemplateTypeParmDecl *TTP = llvm::dyn_cast<clang::TemplateTypeParmDecl>(*Param);
             {
                // We may induce template instantiation
-               cling::Interpreter::PushTransactionRAII clingRAII(const_cast<cling::Interpreter*>(&interpreter));
+               PushTransactionRAIIWrapper clingRAII(interpreter);
                clang::sema::HackForDefaultTemplateArg raii;
                bool HasDefaultArgs;
                clang::TemplateArgumentLoc ArgType = S.SubstDefaultTemplateArgumentIfAvailable(
@@ -3147,7 +3176,7 @@ getFinalSpellingLoc(clang::SourceManager& sourceManager,
 /// Return the header file to be included to declare the Decl.
 
 llvm::StringRef ROOT::TMetaUtils::GetFileName(const clang::Decl& decl,
-                                              const cling::Interpreter& interp)
+                                              const InterpreterInternals &interp)
 {
    // It looks like the template specialization decl actually contains _less_ information
    // on the location of the code than the decl (in case where there is forward declaration,
@@ -3183,7 +3212,7 @@ llvm::StringRef ROOT::TMetaUtils::GetFileName(const clang::Decl& decl,
    static const char invalidFilename[] = "";
    if (!headerLoc.isValid()) return invalidFilename;
 
-   HeaderSearch& HdrSearch = interp.getCI()->getPreprocessor().getHeaderSearchInfo();
+   HeaderSearch& HdrSearch = interp.getSema().getPreprocessor().getHeaderSearchInfo();
 
    SourceManager& sourceManager = decl.getASTContext().getSourceManager();
    headerLoc = getFinalSpellingLoc(sourceManager, headerLoc);
@@ -3299,11 +3328,11 @@ void ROOT::TMetaUtils::GetFullyQualifiedTypeName(std::string &typenamestr,
 
 void ROOT::TMetaUtils::GetFullyQualifiedTypeName(std::string &typenamestr,
                                                  const clang::QualType &qtype,
-                                                 const cling::Interpreter &interpreter)
+                                                 const InterpreterInternals &interpreter)
 {
    GetFullyQualifiedTypeName(typenamestr,
                              qtype,
-                             interpreter.getCI()->getASTContext());
+                             interpreter.getASTContext());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3392,7 +3421,7 @@ clang::TemplateName ROOT::TMetaUtils::ExtractTemplateNameFromQualType(const clan
 static bool areEqualTypes(const clang::TemplateArgument& tArg,
                    llvm::SmallVectorImpl<clang::TemplateArgument>& preceedingTArgs,
                    const clang::NamedDecl& tPar,
-                   const cling::Interpreter& interp,
+                   const ROOT::TMetaUtils::InterpreterInternals& interp,
                    const ROOT::TMetaUtils::TNormalizedCtxt& normCtxt)
 {
    using namespace ROOT::TMetaUtils;
@@ -3455,8 +3484,8 @@ static bool areEqualTypes(const clang::TemplateArgument& tArg,
    bool isEqual=false;
    TemplateArgument newArg = tArg;
    {
-      clang::Sema& S = interp.getCI()->getSema();
-      cling::Interpreter::PushTransactionRAII clingRAII(const_cast<cling::Interpreter*>(&interp));
+      clang::Sema& S = interp.getSema();
+      PushTransactionRAIIWrapper clingRAII(interp);
       clang::sema::HackForDefaultTemplateArg raii; // Hic sunt leones
       bool HasDefaultArgs;
       TemplateArgumentLoc defTArgLoc = S.SubstDefaultTemplateArgumentIfAvailable(Template,
@@ -3533,13 +3562,13 @@ static bool isTypeWithDefault(const clang::NamedDecl* nDecl)
 
 static void KeepNParams(clang::QualType& normalizedType,
                         const clang::QualType& vanillaType,
-                        const cling::Interpreter& interp,
+                        const ROOT::TMetaUtils::InterpreterInternals &interp,
                         const ROOT::TMetaUtils::TNormalizedCtxt& normCtxt);
 
 // Returns true if normTArg might have changed.
 static bool RecurseKeepNParams(clang::TemplateArgument &normTArg,
                                const clang::TemplateArgument &tArg,
-                               const cling::Interpreter& interp,
+                               const ROOT::TMetaUtils::InterpreterInternals& interp,
                                const ROOT::TMetaUtils::TNormalizedCtxt& normCtxt,
                                const clang::ASTContext& astCtxt)
 {
@@ -3589,7 +3618,7 @@ static bool RecurseKeepNParams(clang::TemplateArgument &normTArg,
 
 static void KeepNParams(clang::QualType& normalizedType,
                         const clang::QualType& vanillaType,
-                        const cling::Interpreter& interp,
+                        const ROOT::TMetaUtils::InterpreterInternals & interp,
                         const ROOT::TMetaUtils::TNormalizedCtxt& normCtxt)
 {
    using namespace ROOT::TMetaUtils;
@@ -3801,9 +3830,9 @@ static void KeepNParams(clang::QualType& normalizedType,
 /// requested to be drop by the user.
 /// Default template for STL collections are not yet removed by this routine.
 
-clang::QualType ROOT::TMetaUtils::GetNormalizedType(const clang::QualType &type, const cling::Interpreter &interpreter, const TNormalizedCtxt &normCtxt)
+clang::QualType ROOT::TMetaUtils::GetNormalizedType(const clang::QualType &type, const InterpreterInternals &interpreter, const TNormalizedCtxt &normCtxt)
 {
-   clang::ASTContext &ctxt = interpreter.getCI()->getASTContext();
+   clang::ASTContext &ctxt = interpreter.getASTContext();
 
    clang::QualType normalizedType = cling::utils::Transform::GetPartiallyDesugaredType(ctxt, type, normCtxt.GetConfig(), true /* fully qualify */);
 
@@ -3825,7 +3854,7 @@ clang::QualType ROOT::TMetaUtils::GetNormalizedType(const clang::QualType &type,
 /// This routine might actually belong in the interpreter because
 /// cache the clang::Type might be intepreter specific.
 
-void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name, const clang::QualType &type, const cling::Interpreter &interpreter, const TNormalizedCtxt &normCtxt)
+void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name, const clang::QualType &type, const InterpreterInternals &interpreter, const TNormalizedCtxt &normCtxt)
 {
    if (type.isNull()) {
       norm_name = "";
@@ -3834,7 +3863,7 @@ void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name, const clang::Qu
 
    clang::QualType normalizedType = GetNormalizedType(type,interpreter,normCtxt);
 
-   clang::ASTContext &ctxt = interpreter.getCI()->getASTContext();
+   clang::ASTContext &ctxt = interpreter.getASTContext();
    clang::PrintingPolicy policy(ctxt.getPrintingPolicy());
    policy.SuppressTagKeyword = true; // Never get the class or struct keyword
    policy.SuppressScope = true;      // Force the scope to be coming from a clang::ElaboratedType.
@@ -3864,7 +3893,7 @@ void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name, const clang::Qu
 
 void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name,
                                          const clang::TypeDecl* typeDecl,
-                                         const cling::Interpreter &interpreter)
+                                         const InterpreterInternals &interpreter)
 {
    ROOT::TMetaUtils::TNormalizedCtxt tNormCtxt(interpreter.getLookupHelper());
    const clang::Sema &sema = interpreter.getSema();
@@ -3880,7 +3909,7 @@ void ROOT::TMetaUtils::GetNormalizedName(std::string &norm_name,
 ////////////////////////////////////////////////////////////////////////////////
 std::pair<std::string,clang::QualType>
 ROOT::TMetaUtils::GetNameTypeForIO(const clang::QualType& thisType,
-                                   const cling::Interpreter &interpreter,
+                                   const InterpreterInternals &interpreter,
                                    const TNormalizedCtxt &normCtxt,
                                    TClassEdit::EModType mode)
 {
@@ -3928,7 +3957,7 @@ ROOT::TMetaUtils::GetNameTypeForIO(const clang::QualType& thisType,
 ////////////////////////////////////////////////////////////////////////////////
 
 clang::QualType ROOT::TMetaUtils::GetTypeForIO(const clang::QualType& thisType,
-                                               const cling::Interpreter &interpreter,
+                                               const InterpreterInternals &interpreter,
                                                const TNormalizedCtxt &normCtxt,
                                                TClassEdit::EModType mode)
 {
@@ -4167,13 +4196,13 @@ llvm::StringRef ROOT::TMetaUtils::GetComment(const clang::Decl &decl, clang::Sou
 
 llvm::StringRef ROOT::TMetaUtils::GetClassComment(const clang::CXXRecordDecl &decl,
                                                   clang::SourceLocation *loc,
-                                                  const cling::Interpreter &interpreter)
+                                                  const InterpreterInternals &interpreter)
 {
    using namespace clang;
    SourceLocation commentSLoc;
    llvm::StringRef comment;
 
-   Sema& sema = interpreter.getCI()->getSema();
+   Sema& sema = interpreter.getSema();
 
    const Decl* DeclFileLineDecl
       = interpreter.getLookupHelper().findFunctionProto(&decl, "DeclFileLine", "",
@@ -4953,7 +4982,7 @@ bool ROOT::TMetaUtils::IsHeaderName(const std::string &filename)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-const std::string ROOT::TMetaUtils::AST2SourceTools::Decls2FwdDecls(const std::vector<const clang::Decl *> &decls, cling::Interpreter::IgnoreFilesFunc_t ignoreFiles, const cling::Interpreter &interp)
+const std::string ROOT::TMetaUtils::AST2SourceTools::Decls2FwdDecls(const std::vector<const clang::Decl *> &decls, cling::Interpreter::IgnoreFilesFunc_t ignoreFiles, const ROOT::TMetaUtils::InterpreterInternals &interp)
 {
    clang::Sema &sema = interp.getSema();
    cling::Transaction theTransaction(sema);
@@ -4965,7 +4994,7 @@ const std::string ROOT::TMetaUtils::AST2SourceTools::Decls2FwdDecls(const std::v
    }
    std::string newFwdDecl;
    llvm::raw_string_ostream llvmOstr(newFwdDecl);
-   interp.forwardDeclare(theTransaction, sema.getPreprocessor(), sema.getASTContext(), llvmOstr, true, nullptr, ignoreFiles);
+   interp.getInterpreter().forwardDeclare(theTransaction, sema.getPreprocessor(), sema.getASTContext(), llvmOstr, true, nullptr, ignoreFiles);
    llvmOstr.flush();
    return newFwdDecl;
 }
@@ -5030,7 +5059,7 @@ const clang::RecordDecl* ROOT::TMetaUtils::AST2SourceTools::EncloseInScopes(cons
 
 int ROOT::TMetaUtils::AST2SourceTools::PrepareArgsForFwdDecl(std::string& templateArgs,
                           const clang::TemplateParameterList& tmplParamList,
-                          const cling::Interpreter& interpreter)
+                          const InterpreterInternals &interpreter)
 {
    static const char* paramPackWarning="Template parameter pack found: autoload of variadic templates is not supported yet.\n";
 
@@ -5095,7 +5124,7 @@ int ROOT::TMetaUtils::AST2SourceTools::PrepareArgsForFwdDecl(std::string& templa
 /// Convert a tmplt decl to its fwd decl
 
 int ROOT::TMetaUtils::AST2SourceTools::FwdDeclFromTmplDecl(const clang::TemplateDecl& templDecl,
-                                                           const cling::Interpreter& interpreter,
+                                                           const InterpreterInternals &interpreter,
                                                            std::string& defString)
 {
    std::string templatePrefixString;
@@ -5132,7 +5161,7 @@ int ROOT::TMetaUtils::AST2SourceTools::FwdDeclFromTmplDecl(const clang::Template
 
 static int TreatSingleTemplateArg(const clang::TemplateArgument& arg,
                                   std::string& argFwdDecl,
-                                  const  cling::Interpreter& interpreter,
+                                  const ROOT::TMetaUtils::InterpreterInternals& interpreter,
                                   bool acceptStl=false)
 {
    using namespace ROOT::TMetaUtils::AST2SourceTools;
@@ -5181,7 +5210,7 @@ static int TreatSingleTemplateArg(const clang::TemplateArgument& arg,
 /// If it is contained in a class, just fwd declare the class.
 
 int ROOT::TMetaUtils::AST2SourceTools::FwdDeclFromRcdDecl(const clang::RecordDecl& recordDecl,
-                                                          const cling::Interpreter& interpreter,
+                                                          const InterpreterInternals &interpreter,
                                                           std::string& defString,
                                                           bool acceptStl)
 {
@@ -5252,7 +5281,7 @@ int ROOT::TMetaUtils::AST2SourceTools::FwdDeclFromRcdDecl(const clang::RecordDec
 /// If not, fwd declare the typedef and all the dependent typedefs and types if necessary.
 
 int ROOT::TMetaUtils::AST2SourceTools::FwdDeclFromTypeDefNameDecl(const clang::TypedefNameDecl& tdnDecl,
-                                                                  const cling::Interpreter& interpreter,
+                                                                  const ROOT::TMetaUtils::InterpreterInternals &interpreter,
                                                                   std::string& fwdDeclString,
                                                                   std::unordered_set<std::string>* fwdDeclSetPtr)
 {

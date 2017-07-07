@@ -70,7 +70,7 @@ std::map <clang::Decl*, std::string> RScanner::fgAnonymousEnumMap;
 
 RScanner::RScanner (SelectionRules &rules,
                     EScanType stype,
-                    const cling::Interpreter &interpret,
+                    Sema &interpret,
                     ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
                     unsigned int verbose /* = 0 */) :
   fVerboseLevel(verbose),
@@ -681,7 +681,7 @@ bool RScanner::TreatRecordDeclOrTypedefNameDecl(clang::TypeDecl* typeDecl)
             return true;
          }
          const clang::NamespaceDecl *nsCanonical = nsDecl->getCanonicalDecl();
-         if (nsCanonical && nsCanonical == fInterpreter.getCI()->getSema().getStdNamespace()) {
+         if (nsCanonical && nsCanonical == fInterpreter.getStdNamespace()) {
             if (selected->HasAttributeFileName() || selected->HasAttributeFilePattern()) {
                return true;
             }

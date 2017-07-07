@@ -47,7 +47,7 @@ ROOT::Internal::RStl& ROOT::Internal::RStl::Instance()
 
 }
 
-void ROOT::Internal::RStl::GenerateTClassFor(const clang::QualType &type, const cling::Interpreter &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt)
+void ROOT::Internal::RStl::GenerateTClassFor(const clang::QualType &type, const ROOT::TMetaUtils::InterpreterInternals &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt)
 {
    // Force the generation of the TClass for the given class.
 
@@ -98,7 +98,7 @@ void ROOT::Internal::RStl::GenerateTClassFor(const clang::QualType &type, const 
                                                        false,
                                                        false,
                                                        -1,
-                                                       interp,
+                                                       interp.getSema(),
                                                        normCtxt) );
 
    // fprintf(stderr,"Registered the STL class %s as needing a dictionary\n",R__GetQualifiedName(*stlclass).c_str());
@@ -123,7 +123,7 @@ void ROOT::Internal::RStl::GenerateTClassFor(const clang::QualType &type, const 
    }
 }
 
-void ROOT::Internal::RStl::GenerateTClassFor(const char *requestedName, const clang::CXXRecordDecl *stlclass, const cling::Interpreter &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt)
+void ROOT::Internal::RStl::GenerateTClassFor(const char *requestedName, const clang::CXXRecordDecl *stlclass, const TMetaUtils::InterpreterInternals &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt)
 {
    // Force the generation of the TClass for the given class.
    const clang::ClassTemplateSpecializationDecl *templateCl = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(stlclass);
@@ -148,7 +148,7 @@ void ROOT::Internal::RStl::GenerateTClassFor(const char *requestedName, const cl
       }
    }
 
-   fList.insert( ROOT::TMetaUtils::AnnotatedRecordDecl(++fgCount,stlclass,requestedName,true,false,false,false,-1, interp,normCtxt) );
+   fList.insert( ROOT::TMetaUtils::AnnotatedRecordDecl(++fgCount,stlclass,requestedName,true,false,false,false,-1, interp.getSema(),normCtxt) );
 
    TClassEdit::TSplitType splitType( requestedName, (TClassEdit::EModType)(TClassEdit::kLong64 | TClassEdit::kDropStd) );
    for(unsigned int i=0; i <  templateCl->getTemplateArgs().size(); ++i) {

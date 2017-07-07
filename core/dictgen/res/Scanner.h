@@ -75,7 +75,7 @@ public:
 
    RScanner (SelectionRules &rules,
              EScanType stype,
-             const cling::Interpreter &interpret,
+             clang::Sema&interpret,
              ROOT::TMetaUtils::TNormalizedCtxt &normCtxt,
              unsigned int verbose = 0);
 
@@ -169,7 +169,7 @@ private:
    void UnsupportedType(clang::QualType qual_type) const;
 
    const clang::SourceManager* fSourceManager;
-   const cling::Interpreter &fInterpreter;
+   clang::Sema &fInterpreter;
    static const int fgDeclLast = clang::Decl::Var;
    static const int fgTypeLast = clang::Type::TemplateTypeParm;
    bool fDeclTable [ fgDeclLast+1 ];

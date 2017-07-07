@@ -14,6 +14,7 @@
 
 #include "RConversionRuleParser.h"
 
+#include <cassert>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -44,6 +45,7 @@ namespace clang {
    class PresumedLoc;
    class QualType;
    class RecordDecl;
+   class Sema;
    class SourceLocation;
    class TagDecl;
    class TemplateDecl;
@@ -80,6 +82,7 @@ namespace ROOT {
 
 // Forward Declarations --------------------------------------------------------
 class AnnotatedRecordDecl;
+class InterpreterInternals;
 
 // Constants, typedefs and Enums -----------------------------------------------
 
@@ -100,7 +103,7 @@ namespace propNames{
 enum DataMemberInfo__ValidArrayIndex_error_code { VALID, NOT_INT, NOT_DEF, IS_PRIVATE, UNKNOWN };
 
 typedef void (*CallWriteStreamer_t)(const AnnotatedRecordDecl &cl,
-                                    const cling::Interpreter &interp,
+                                    const ROOT::TMetaUtils::InterpreterInternals &interp,
                                     const TNormalizedCtxt &normCtxt,
                                     std::ostream& dictStream,
                                     bool isAutoStreamer);
@@ -116,6 +119,35 @@ const int kMaxLen          =   1024;
 
 // Classes ---------------------------------------------------------------------
 class TNormalizedCtxtImpl;
+
+
+//______________________________________________________________________________
+class InterpreterInternals {
+  const cling::Interpreter* interp = nullptr;
+  clang::Sema& Sema;
+public:
+  InterpreterInternals(const cling::Interpreter &interp);
+  InterpreterInternals(clang::Sema& Sema) : Sema(Sema) {}
+  clang::Sema& getSema() const {
+    return Sema;
+  }
+
+  clang::ASTContext& getASTContext() const;
+  cling::LookupHelper &getLookupHelper() const;
+  const cling::Interpreter& getInterpreter() const {
+    if (interp)
+      return *interp;
+    assert(interp);
+    abort();
+  }
+  bool hasInterpreter() const {
+    return interp;
+  }
+  /*operator const cling::Interpreter&() const {
+    return getInterpreter();
+  }*/
+
+};
 
 //______________________________________________________________________________
 class TNormalizedCtxt {
@@ -196,7 +228,7 @@ public:
                        bool rRequestNoInputOperator,
                        bool rRequestOnlyTClass,
                        int rRequestedVersionNumber,
-                       const cling::Interpreter &interpret,
+                       clang::Sema &interpret,
                        const TNormalizedCtxt &normCtxt);
 
    AnnotatedRecordDecl(long index,
@@ -207,7 +239,7 @@ public:
                        bool rRequestNoInputOperator,
                        bool rRequestOnlyTClass,
                        int rRequestedVersionNumber,
-                       const cling::Interpreter &interpret,
+                       clang::Sema &interpret,
                        const TNormalizedCtxt &normCtxt);
 
    AnnotatedRecordDecl(long index,
@@ -219,7 +251,7 @@ public:
                        bool rRequestNoInputOperator,
                        bool rRequestOnlyTClass,
                        int rRequestedVersionNumber,
-                       const cling::Interpreter &interpret,
+                       clang::Sema &interpret,
                        const TNormalizedCtxt &normCtxt);
 
    AnnotatedRecordDecl(long index,
@@ -232,7 +264,7 @@ public:
                        bool rRequestNoInputOperator,
                        bool rRequestOnlyTClass,
                        int rRequestedVersionNumber,
-                       const cling::Interpreter &interpret,
+                       clang::Sema &interpret,
                        const TNormalizedCtxt &normCtxt);
 
    ~AnnotatedRecordDecl() {
@@ -318,15 +350,15 @@ bool ExtractAttrIntPropertyFromName(const clang::Decl& decl,
                                     int& propValue);
 
 //______________________________________________________________________________
-bool RequireCompleteType(const cling::Interpreter &interp, const clang::CXXRecordDecl *cl);
+bool RequireCompleteType(const InterpreterInternals &interp, const clang::CXXRecordDecl *cl);
 
 //______________________________________________________________________________
-bool RequireCompleteType(const cling::Interpreter &interp, clang::SourceLocation Loc, clang::QualType Type);
+bool RequireCompleteType(const InterpreterInternals &interp, clang::SourceLocation Loc, clang::QualType Type);
 
 //______________________________________________________________________________
 // Add default template parameters.
 clang::QualType AddDefaultParameters(clang::QualType instanceType,
-                                     const cling::Interpreter &interpret,
+                                     const InterpreterInternals &interpret,
                                      const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
@@ -335,10 +367,10 @@ llvm::StringRef DataMemberInfo__ValidArrayIndex(const clang::DeclaratorDecl &m, 
 enum class EIOCtorCategory : short {kAbsent, kDefault, kIOPtrType, kIORefType};
 
 //______________________________________________________________________________
-EIOCtorCategory CheckConstructor(const clang::CXXRecordDecl*, const RConstructorType&, const cling::Interpreter& interp);
+EIOCtorCategory CheckConstructor(const clang::CXXRecordDecl*, const RConstructorType&, const InterpreterInternals& interp);
 
 //______________________________________________________________________________
-const clang::FunctionDecl* ClassInfo__HasMethod(const clang::DeclContext *cl, char const*, const cling::Interpreter& interp);
+const clang::FunctionDecl* ClassInfo__HasMethod(const clang::DeclContext *cl, char const*, const InterpreterInternals& interp);
 
 //______________________________________________________________________________
 void CreateNameTypeMap(clang::CXXRecordDecl const&, std::map<std::string, ROOT::Internal::TSchemaType>&);
@@ -349,44 +381,44 @@ int ElementStreamer(std::ostream& finalString,
                     const clang::QualType &qti,
                     const char *t,
                     int rwmode,
-                    const cling::Interpreter &interp,
+                    const InterpreterInternals &interp,
                     const char *tcl=0);
 
 //______________________________________________________________________________
-bool IsBase(const clang::CXXRecordDecl *cl, const clang::CXXRecordDecl *base, const clang::CXXRecordDecl *context,const cling::Interpreter &interp);
+bool IsBase(const clang::CXXRecordDecl *cl, const clang::CXXRecordDecl *base, const clang::CXXRecordDecl *context,const InterpreterInternals &interp);
 
 //______________________________________________________________________________
-bool IsBase(const clang::FieldDecl &m, const char* basename, const cling::Interpreter &interp);
+bool IsBase(const clang::FieldDecl &m, const char* basename, const InterpreterInternals &interp);
 
 //______________________________________________________________________________
-bool HasCustomOperatorNewArrayPlacement(clang::RecordDecl const&, const cling::Interpreter &interp);
+bool HasCustomOperatorNewArrayPlacement(clang::RecordDecl const&, const InterpreterInternals &interp);
 
 //______________________________________________________________________________
-bool HasCustomOperatorNewPlacement(char const*, clang::RecordDecl const&, const cling::Interpreter&);
+bool HasCustomOperatorNewPlacement(char const*, clang::RecordDecl const&, const InterpreterInternals&);
 
 //______________________________________________________________________________
-bool HasCustomOperatorNewPlacement(clang::RecordDecl const&, const cling::Interpreter&);
+bool HasCustomOperatorNewPlacement(clang::RecordDecl const&, const InterpreterInternals&);
 
 //______________________________________________________________________________
-bool HasDirectoryAutoAdd(clang::CXXRecordDecl const*, const cling::Interpreter&);
+bool HasDirectoryAutoAdd(clang::CXXRecordDecl const*, const InterpreterInternals&);
 
 //______________________________________________________________________________
-bool HasIOConstructor(clang::CXXRecordDecl const*, std::string&, const RConstructorTypes&, const cling::Interpreter&);
+bool HasIOConstructor(clang::CXXRecordDecl const*, std::string&, const RConstructorTypes&, const InterpreterInternals&);
 
 //______________________________________________________________________________
-bool HasNewMerge(clang::CXXRecordDecl const*, const cling::Interpreter&);
+bool HasNewMerge(clang::CXXRecordDecl const*, const InterpreterInternals&);
 
 //______________________________________________________________________________
-bool HasOldMerge(clang::CXXRecordDecl const*, const cling::Interpreter&);
+bool HasOldMerge(clang::CXXRecordDecl const*, const InterpreterInternals&);
 
 //______________________________________________________________________________
 bool hasOpaqueTypedef(clang::QualType instanceType, const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
-bool hasOpaqueTypedef(const AnnotatedRecordDecl &cl, const cling::Interpreter &interp, const TNormalizedCtxt &normCtxt);
+bool hasOpaqueTypedef(const AnnotatedRecordDecl &cl, const InterpreterInternals &interp, const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
-bool HasResetAfterMerge(clang::CXXRecordDecl const*, const cling::Interpreter&);
+bool HasResetAfterMerge(clang::CXXRecordDecl const*, const InterpreterInternals&);
 
 //______________________________________________________________________________
 bool NeedDestructor(clang::CXXRecordDecl const*);
@@ -396,7 +428,7 @@ bool NeedTemplateKeyword(clang::CXXRecordDecl const*);
 
 //______________________________________________________________________________
 bool CheckPublicFuncWithProto(clang::CXXRecordDecl const*, char const*, char const*,
-                              const cling::Interpreter&, bool diagnose);
+                              const InterpreterInternals&, bool diagnose);
 
 //______________________________________________________________________________
 long GetLineNumber(clang::Decl const*);
@@ -441,10 +473,10 @@ int WriteNamespaceHeader(std::ostream&, const clang::RecordDecl *);
 int WriteNamespaceHeader(std::ostream&, const clang::DeclContext *);
 
 //______________________________________________________________________________
-void WritePointersSTL(const AnnotatedRecordDecl &cl, const cling::Interpreter &interp, const TNormalizedCtxt &normCtxt);
+void WritePointersSTL(const AnnotatedRecordDecl &cl, const InterpreterInternals &interp, const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
-int GetClassVersion(const clang::RecordDecl *cl, const cling::Interpreter &interp);
+int GetClassVersion(const clang::RecordDecl *cl, const InterpreterInternals &interp);
 
 //______________________________________________________________________________
 int IsSTLContainer(const AnnotatedRecordDecl &annotated);
@@ -462,7 +494,7 @@ const char *ShortTypeName(const char *typeDesc);
 std::string ShortTypeName(const clang::FieldDecl &m);
 
 //______________________________________________________________________________
-bool IsStreamableObject(const clang::FieldDecl &m, const cling::Interpreter& interp);
+bool IsStreamableObject(const clang::FieldDecl &m, const InterpreterInternals& interp);
 
 //______________________________________________________________________________
 clang::RecordDecl *GetUnderlyingRecordDecl(clang::QualType type);
@@ -472,7 +504,7 @@ std::string TrueName(const clang::FieldDecl &m);
 
 //______________________________________________________________________________
 const clang::CXXRecordDecl *ScopeSearch(const char *name,
-                                        const cling::Interpreter &gInterp,
+                                        const InterpreterInternals &gInterp,
                                         bool diagnose,
                                         const clang::Type** resultType);
 
@@ -480,7 +512,7 @@ const clang::CXXRecordDecl *ScopeSearch(const char *name,
 void WriteAuxFunctions(std::ostream& finalString,
                        const AnnotatedRecordDecl &cl,
                        const clang::CXXRecordDecl *decl,
-                       const cling::Interpreter &interp,
+                       const InterpreterInternals &interp,
                        const RConstructorTypes& ctorTypes,
                        const TNormalizedCtxt &normCtxt);
 
@@ -489,13 +521,13 @@ void WriteAuxFunctions(std::ostream& finalString,
 const clang::FunctionDecl *GetFuncWithProto(const clang::Decl* cinfo,
                                             const char *method,
                                             const char *proto,
-                                            const cling::Interpreter &gInterp,
+                                            const InterpreterInternals &gInterp,
                                             bool diagnose);
 
 //______________________________________________________________________________
 void WriteClassCode(CallWriteStreamer_t WriteStreamerFunc,
                     const AnnotatedRecordDecl &cl,
-                    const cling::Interpreter &interp,
+                    const InterpreterInternals &interp,
                     const TNormalizedCtxt &normCtxt,
                     std::ostream& finalString,
                     const RConstructorTypes& ctorTypes,
@@ -505,7 +537,7 @@ void WriteClassCode(CallWriteStreamer_t WriteStreamerFunc,
 void WriteClassInit(std::ostream& finalString,
                     const AnnotatedRecordDecl &cl,
                     const clang::CXXRecordDecl *decl,
-                    const cling::Interpreter &interp,
+                    const InterpreterInternals &interp,
                     const TNormalizedCtxt &normCtxt,
                     const RConstructorTypes& ctorTypes,
                     bool& needCollectionProxy);
@@ -513,19 +545,19 @@ void WriteClassInit(std::ostream& finalString,
 //______________________________________________________________________________
 bool HasCustomStreamerMemberFunction(const AnnotatedRecordDecl &cl,
                                      const clang::CXXRecordDecl* clxx,
-                                     const cling::Interpreter &interp,
+                                     const InterpreterInternals &interp,
                                      const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
 bool HasCustomConvStreamerMemberFunction(const AnnotatedRecordDecl &cl,
                                          const clang::CXXRecordDecl* clxx,
-                                         const cling::Interpreter &interp,
+                                         const InterpreterInternals &interp,
                                          const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
 // Return the header file to be included to declare the Decl
 llvm::StringRef GetFileName(const clang::Decl& decl,
-                            const cling::Interpreter& interp);
+                            const InterpreterInternals& interp);
 
 //______________________________________________________________________________
 // Return the dictionary file name for a module
@@ -545,7 +577,7 @@ void GetCppName(std::string &output, const char *input);
 //______________________________________________________________________________
 // Return the type with all parts fully qualified (most typedefs),
 // including template arguments, appended to name.
-void GetFullyQualifiedTypeName(std::string &name, const clang::QualType &type, const cling::Interpreter &interpreter);
+void GetFullyQualifiedTypeName(std::string &name, const clang::QualType &type, const InterpreterInternals &interpreter);
 
 //______________________________________________________________________________
 // Return the type with all parts fully qualified (most typedefs),
@@ -558,26 +590,26 @@ void GetFullyQualifiedTypeName(std::string &name, const clang::QualType &type, c
 // adding default template argument for all types except those explicitly
 // requested to be drop by the user.
 // Default template for STL collections are not yet removed by this routine.
-clang::QualType GetNormalizedType(const clang::QualType &type, const cling::Interpreter &interpreter, const TNormalizedCtxt &normCtxt);
+clang::QualType GetNormalizedType(const clang::QualType &type, const InterpreterInternals &interpreter, const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
 // Return the type name normalized for ROOT,
 // keeping only the ROOT opaque typedef (Double32_t, etc.) and
 // adding default template argument for all types except the STL collections
 // where we remove the default template argument if any.
-void GetNormalizedName(std::string &norm_name, const clang::QualType &type, const cling::Interpreter &interpreter, const TNormalizedCtxt &normCtxt);
+void GetNormalizedName(std::string &norm_name, const clang::QualType &type, const InterpreterInternals &interpreter, const TNormalizedCtxt &normCtxt);
 
 //______________________________________________________________________________
 // Alternative signature
 void GetNormalizedName(std::string &norm_name,
                        const clang::TypeDecl* typeDecl,
-                       const cling::Interpreter &interpreter);
+                       const InterpreterInternals &interpreter);
 
 //______________________________________________________________________________
 // Analog to GetNameForIO but with types.
 // It uses the LookupHelper of Cling to transform the name in type.
 clang::QualType GetTypeForIO(const clang::QualType& templateInstanceType,
-                             const cling::Interpreter &interpreter,
+                             const InterpreterInternals &interpreter,
                              const TNormalizedCtxt &normCtxt,
                              TClassEdit::EModType mode = TClassEdit::kNone);
 
@@ -585,7 +617,7 @@ clang::QualType GetTypeForIO(const clang::QualType& templateInstanceType,
 // Get the name and the type for the IO given a certain type. In some sense the
 // combination of GetNameForIO and GetTypeForIO.
 std::pair<std::string,clang::QualType> GetNameTypeForIO(const clang::QualType& templateInstanceType,
-                                                        const cling::Interpreter &interpreter,
+                                                        const InterpreterInternals &interpreter,
                                                         const TNormalizedCtxt &normCtxt,
                                                         TClassEdit::EModType mode = TClassEdit::kNone);
 
@@ -595,7 +627,7 @@ llvm::StringRef GetComment(const clang::Decl &decl, clang::SourceLocation *loc =
 
 //______________________________________________________________________________
 // Returns the comment of the ClassDef macro
-llvm::StringRef GetClassComment(const clang::CXXRecordDecl &decl, clang::SourceLocation *loc, const cling::Interpreter &interpreter);
+llvm::StringRef GetClassComment(const clang::CXXRecordDecl &decl, clang::SourceLocation *loc, const InterpreterInternals &interpreter);
 
 //______________________________________________________________________________
 // Return the base/underlying type of a chain of array or pointers type.
@@ -815,12 +847,12 @@ namespace AST2SourceTools {
 //______________________________________________________________________________
 const std::string Decls2FwdDecls(const std::vector<const clang::Decl*> &decls,
                                  bool (*ignoreFiles)(const clang::PresumedLoc&) ,
-                                 const cling::Interpreter& interp);
+                                 const InterpreterInternals& interp);
 
 //______________________________________________________________________________
 int PrepareArgsForFwdDecl(std::string& templateArgs,
                           const clang::TemplateParameterList& tmplParamList,
-                          const cling::Interpreter& interpreter);
+                          const InterpreterInternals& interpreter);
 
 //______________________________________________________________________________
 int EncloseInNamespaces(const clang::Decl& decl, std::string& defString);
@@ -830,24 +862,24 @@ const clang::RecordDecl* EncloseInScopes(const clang::Decl& decl, std::string& d
 
 //______________________________________________________________________________
 int FwdDeclFromRcdDecl(const clang::RecordDecl& recordDecl,
-                       const cling::Interpreter& interpreter,
+                       const InterpreterInternals& interpreter,
                        std::string& defString,
                        bool acceptStl=false);
 
 //______________________________________________________________________________
 int FwdDeclFromTmplDecl(const clang::TemplateDecl& tmplDecl,
-                        const cling::Interpreter& interpreter,
+                        const InterpreterInternals& interpreter,
                         std::string& defString);
 //______________________________________________________________________________
 int GetDefArg(const clang::ParmVarDecl& par, std::string& valAsString, const clang::PrintingPolicy& pp);
 
 //______________________________________________________________________________
 int FwdDeclFromFcnDecl(const clang::FunctionDecl& fcnDecl,
-                       const cling::Interpreter& interpreter,
+                       const InterpreterInternals& interpreter,
                        std::string& defString);
 //______________________________________________________________________________
 int FwdDeclFromTypeDefNameDecl(const clang::TypedefNameDecl& tdnDecl,
-                               const cling::Interpreter& interpreter,
+                               const InterpreterInternals& interpreter,
                                std::string& fwdDeclString,
                                std::unordered_set<std::string>* fwdDeclSet=nullptr);
 

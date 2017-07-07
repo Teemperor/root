@@ -54,8 +54,8 @@ namespace Internal {
       static RStl& Instance();
       ~RStl() {};
 
-      void GenerateTClassFor(const char *requestedName, const clang::CXXRecordDecl *stlClass, const cling::Interpreter &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt);
-      void GenerateTClassFor(const clang::QualType &type, const cling::Interpreter &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt);
+      void GenerateTClassFor(const char *requestedName, const clang::CXXRecordDecl *stlClass, const TMetaUtils::InterpreterInternals &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt);
+      void GenerateTClassFor(const clang::QualType &type, const TMetaUtils::InterpreterInternals &interp, const ROOT::TMetaUtils::TNormalizedCtxt &normCtxt);
       void Print();
       void WriteClassInit(std::ostream &strm,
                           const cling::Interpreter &interp,
