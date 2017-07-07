@@ -57,6 +57,7 @@ namespace cling {
     unsigned StdLib : 1;
     unsigned HasOutput : 1;
     unsigned Verbose : 1;
+    unsigned CxxModules : 1;
 
     ///\brief The remaining arguments to pass to clang.
     ///

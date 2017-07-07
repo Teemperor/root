@@ -18,6 +18,8 @@
 
 #include <cstdio>
 
+using namespace cling::runtime::gCling;
+
 using namespace cling;
 using namespace llvm;
 

@@ -47,6 +47,7 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
+#include <iostream>
 #include <sys/stat.h>
 #include <system_error>
 #include <time.h>
@@ -1035,7 +1036,7 @@ static bool compileModuleImpl(CompilerInstance &ImportingInstance,
                               StringRef ModuleFileName) {
   ModuleMap &ModMap 
     = ImportingInstance.getPreprocessor().getHeaderSearchInfo().getModuleMap();
-    
+
   // Construct a compiler invocation for creating this module.
   auto Invocation =
       std::make_shared<CompilerInvocation>(ImportingInstance.getInvocation());
@@ -1149,9 +1150,15 @@ static bool compileModuleImpl(CompilerInstance &ImportingInstance,
     SourceMgr.overrideFileContents(ModuleMapFile, std::move(ModuleMapBuffer));
   }
 
+  if (!Module->IsSystem) {
+    std::cerr << "[WARNING!] Trying to build non-system module " << Module->Name << " in " << ModuleFileName.str() << std::endl;
+  }
+
   ImportingInstance.getDiagnostics().Report(ImportLoc,
                                             diag::remark_module_build)
     << Module->Name << ModuleFileName;
+
+  //assert(Module->IsSystem && "Implicitly building non system module");
 
   // Execute the action to actually build the module in-place. Use a separate
   // thread so that we get a stack large enough.
@@ -1643,6 +1650,7 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
                                    serialization::MK_ImplicitModule,
                                    ImportLoc,
                                    ARRFlags)) {
+    case ASTReader::OutOfDate:
     case ASTReader::Success: {
       if (LoadFromPrebuiltModulePath && !Module) {
         Module = PP->getHeaderSearchInfo().lookupModule(ModuleName);
@@ -1660,7 +1668,6 @@ CompilerInstance::loadModule(SourceLocation ImportLoc,
       break;
     }
 
-    case ASTReader::OutOfDate:
     case ASTReader::Missing: {
       if (LoadFromPrebuiltModulePath) {
         // We can't rebuild the module without a module map. Since ReadAST

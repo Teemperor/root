@@ -7,6 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/DeclCXX.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/Basic/FileManager.h"
@@ -153,6 +154,7 @@ GenerateModuleAction::CreateASTConsumer(CompilerInstance &CI,
   auto Buffer = std::make_shared<PCHBuffer>();
   std::vector<std::unique_ptr<ASTConsumer>> Consumers;
 
+  //Consumers.push_back(llvm::make_unique<CommentToAnnotate>());
   Consumers.push_back(llvm::make_unique<PCHGenerator>(
                         CI.getPreprocessor(), OutputFile, Sysroot,
                         Buffer, CI.getFrontendOpts().ModuleFileExtensions,

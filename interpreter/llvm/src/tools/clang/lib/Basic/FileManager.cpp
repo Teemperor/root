@@ -444,7 +444,7 @@ FileManager::getBufferForFile(const FileEntry *Entry, bool isVolatile,
   uint64_t FileSize = Entry->getSize();
   // If there's a high enough chance that the file have changed since we
   // got its size, force a stat before opening it.
-  if (isVolatile)
+  //Seems to fail sometimes and gets wrong size for modulemap: if (isVolatile)
     FileSize = -1;
 
   StringRef Filename = Entry->getName();

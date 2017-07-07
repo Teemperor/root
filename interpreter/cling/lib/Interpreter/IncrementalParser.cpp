@@ -23,6 +23,7 @@
 #include "ValueExtractionSynthesizer.h"
 #include "ValuePrinterSynthesizer.h"
 #include "cling/Interpreter/CIFactory.h"
+#include "cling/Interpreter/DynamicLibraryManager.h"
 #include "cling/Interpreter/Interpreter.h"
 #include "cling/Interpreter/InterpreterCallbacks.h"
 #include "cling/Interpreter/Transaction.h"
@@ -38,6 +39,8 @@
 #include "clang/Basic/FileManager.h"
 #include "clang/CodeGen/ModuleBuilder.h"
 #include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/MultiplexConsumer.h"
+#include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Parse/Parser.h"
@@ -50,9 +53,55 @@
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/MemoryBuffer.h"
 
+#include <iostream>
+#include <fstream>
 #include <stdio.h>
 
 using namespace clang;
+
+namespace cling {
+  class LibListener : public ASTConsumer {
+    cling::Interpreter* interp;
+    std::set<clang::Module*> Mods;
+  public:
+
+    LibListener(cling::Interpreter* interp) : interp(interp) {}
+
+    std::vector<std::string> ToLoad;
+
+    virtual bool HandleTopLevelDecl(DeclGroupRef DGR) override {
+      for (Decl* D : DGR) {
+        if (isa<ImportDecl>(D))
+            continue;
+      // if (shouldIgnore(D))
+      //      continue;
+
+        /*if (const FunctionDecl* FD = dyn_cast<FunctionDecl>(D)) {
+          if (FD->isInlined() || FD->isTemplateInstantiation())
+            continue;
+        }
+        if (const VarDecl* VD = dyn_cast<VarDecl>(D)) {
+          if (!VD->hasExternalStorage())
+            continue;
+        }*/
+
+        clang::Module* M = D->getImportedOwningModule();
+        if (M == nullptr)
+          continue;
+        while (M && M->Parent) {
+            M = M->Parent;
+        }
+        auto OldSize = Mods.size();
+        Mods.insert(M);
+        if (Mods.size() != OldSize) {
+          if (M->Name != "Core")
+            ToLoad.push_back(M->Name);
+        }
+      }
+      return true;
+    }
+  };
+}
 
 namespace {
 
@@ -165,10 +214,22 @@ namespace {
 namespace cling {
   IncrementalParser::IncrementalParser(Interpreter* interp, const char* llvmdir)
       : m_Interpreter(interp),
-        m_CI(CIFactory::createCI("", interp->getOptions(), llvmdir,
-                                 m_Consumer = new cling::DeclCollector())),
         m_ModuleNo(0) {
 
+    std::vector<std::unique_ptr<ASTConsumer>> Consumers;
+
+    m_LibListener = new LibListener(interp);
+    std::unique_ptr<LibListener> LibListenerUnique(m_LibListener);
+    Consumers.push_back(std::move(LibListenerUnique));
+
+    m_Consumer = new cling::DeclCollector();
+    std::unique_ptr<cling::DeclCollector> DeclCollectorUnique(m_Consumer);
+    Consumers.push_back(std::move(DeclCollectorUnique));
+
+    clang::MultiplexConsumer *multiConsumer = new clang::MultiplexConsumer(std::move(Consumers));
+
+    m_CI.reset(CIFactory::createCI("", interp->getOptions(), llvmdir,
+                             multiConsumer));
     if (!m_CI) {
       cling::errs() << "Compiler instance could not be created.\n";
       return;
@@ -258,6 +319,84 @@ namespace cling {
       // We need to include it to determine the version number of the standard
       // library implementation.
       ParseInternal("#include <new>");
+      if (!getenv("ROOT_MODULES")) {
+        ParseInternal("#include <RtypesCore.h>");
+      }
+
+
+      if (m_Interpreter->getParser().getLangOpts().Modules) {
+         clang::CompilerInstance* CI = m_Interpreter->getCI();
+
+         clang::HeaderSearch &headerSearch = CI->getPreprocessor().getHeaderSearchInfo();
+         clang::ModuleMap &moduleMap = headerSearch.getModuleMap();
+
+         llvm::SetVector<clang::Module *> modules;
+
+         for (auto MI = moduleMap.module_begin(), end = moduleMap.module_end(); MI != end; MI++) {
+            clang::Module* Module = MI->second;
+            HeaderSearchOptions &HSOpts =
+                PP.getHeaderSearchInfo().getHeaderSearchOpts();
+
+            std::string ModuleFileName;
+            bool LoadFromPrebuiltModulePath = false;
+            // We try to load the module from the prebuilt module paths. If not
+            // successful, we then try to find it in the module cache.
+            if (!HSOpts.PrebuiltModulePaths.empty()) {
+              // Load the module from the prebuilt module path.
+              ModuleFileName = PP.getHeaderSearchInfo().getModuleFileName(
+                  Module->Name, "", /*UsePrebuiltPath*/ true);
+              if (!ModuleFileName.empty())
+                LoadFromPrebuiltModulePath = true;
+            }
+            if (!LoadFromPrebuiltModulePath && Module) {
+              // Load the module from the module cache.
+              ModuleFileName = PP.getHeaderSearchInfo().getModuleFileName(Module);
+            }
+            //std::cerr << "FOO:" << ModuleFileName << " ";
+            bool Exists = false;
+            {
+              std::ifstream f(ModuleFileName);
+              Exists = f.good();
+            }
+            //std::cerr << Exists << std::endl;
+            if (Exists)
+              modules.insert(Module);
+         }
+
+         for (size_t i = 0; i < modules.size(); ++i) {
+            clang::Module *M = modules[i];
+            for (clang::Module *subModule : M->submodules()) modules.insert(subModule);
+         }
+
+         // Now we collect all header files from the previously collected modules.
+         std::set<std::string> moduleHeaders;
+         for (clang::Module *module : modules) {
+            for (int i = 0; i < 4; i++) {
+               auto &headerList = module->Headers[i];
+               for (const clang::Module::Header &moduleHeader : headerList) {
+                  if (moduleHeader.NameAsWritten == "LIBRARIES") {
+                      std::cerr << "AAAA: " << module->Name << std::endl;
+                    }
+                  moduleHeaders.insert(moduleHeader.NameAsWritten);
+               }
+            }
+         }
+
+         for (std::string H : moduleHeaders) {
+            if (H == "GL/glew.h")
+               continue;
+            if (H == "GL/glxew.h")
+               continue;
+            if (H.find("SQL") != H.npos)
+               continue;
+            if (H.find(".inc") != H.npos)
+               continue;
+            if (H == "TException.h")
+                continue;
+            ParseInternal("#include \"" + H + "\"");
+         }
+
+      }
       // That's really C++ ABI compatibility. C has other problems ;-)
       CheckABICompatibility(*m_Interpreter);
     }
@@ -339,6 +478,13 @@ namespace cling {
     }
 #endif
 
+    if (m_Interpreter->ActuallyValid)
+      for (auto Lib : m_LibListener->ToLoad) {
+         auto result = m_Interpreter->getDynamicLibraryManager()->loadLibrary(Lib, true, false);
+         std::cerr << "Lresult " << Lib << result << std::endl;
+      }
+    m_LibListener->ToLoad.clear();
+
     T->setState(Transaction::kCompleted);
 
     DiagnosticsEngine& Diag = getCI()->getSema().getDiagnostics();
@@ -382,6 +528,7 @@ namespace cling {
   }
 
   llvm::Module* IncrementalParser::StartModule() {
+
     return getCodeGenerator()->StartModule(makeModuleName(),
                                            *m_Interpreter->getLLVMContext(),
                                            getCI()->getCodeGenOpts());
@@ -645,15 +792,16 @@ namespace cling {
   IncrementalParser::EParseResult
   IncrementalParser::ParseInternal(llvm::StringRef input) {
     if (input.empty()) return IncrementalParser::kSuccess;
+    //std::cout << "P:" << input.str() << std::endl;
 
     Sema& S = getCI()->getSema();
 
     const CompilationOptions& CO
        = m_Consumer->getTransaction()->getCompilationOpts();
 
-    assert(!(S.getLangOpts().Modules
-             && CO.CodeGenerationForModule)
-           && "CodeGenerationForModule to be removed once PCMs are available!");
+//    assert(!(S.getLangOpts().Modules
+//             && CO.CodeGenerationForModule)
+//           && "CodeGenerationForModule to be removed once PCMs are available!");
 
     // Recover resources if we crash before exiting this method.
     llvm::CrashRecoveryContextCleanupRegistrar<Sema> CleanupSema(&S);

@@ -136,6 +136,7 @@ void CompilerOptions::Parse(int argc, const char* const argv[],
       // case options::OPT_nostdinc:
       case options::OPT_nostdincxx: NoCXXInc = true; break;
       case options::OPT_v: Verbose = true; break;
+      case options::OPT_fmodules: CxxModules = true; break;
 
       default:
         if (Inputs && arg->getOption().getKind() == Option::InputClass)

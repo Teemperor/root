@@ -1456,7 +1456,7 @@ void TClass::Init(const char *name, Version_t cversion,
    if (!silent && (!fClassInfo && !fCanLoadClassInfo) && !isStl && fName.First('@')==kNPOS &&
        !TClassEdit::IsInterpreterDetail(fName.Data()) ) {
       if (fState == kHasTClassInit) {
-         ::Error("TClass::Init", "no interpreter information for class %s is available even though it has a TClass initialization routine.", fName.Data());
+         ::Error("TClass::Init", "no interpreter information for class %s is available even though it has a TClass initialization routine.2", fName.Data());
       } else {
          // In this case we initialised this TClass instance starting from the fwd declared state
          // and we know we have no dictionary: no need to warn

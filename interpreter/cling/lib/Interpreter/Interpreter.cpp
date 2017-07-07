@@ -473,6 +473,7 @@ namespace cling {
 
     Transaction *T;
     declare(Strm.str(), &T);
+    ActuallyValid = true;
     return T;
   }
 

@@ -4270,6 +4270,9 @@ void ASTRecordWriter::AddAttributes(ArrayRef<const Attr *> Attrs) {
   for (const auto *A : Attrs) {
     Record.push_back(A->getKind()); // FIXME: stable encoding, target attrs
     Record.AddSourceRange(A->getRange());
+    if (const AnnotateAttr *AA = dyn_cast<AnnotateAttr>(A)) {
+        llvm::errs() << "ANNOTATED: " << AA->getAnnotation() << "\n";
+      }
 
 #include "clang/Serialization/AttrPCHWrite.inc"
 

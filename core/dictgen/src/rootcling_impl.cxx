@@ -214,6 +214,7 @@ const char *rootClingHelp =
 #endif
 
 
+#include "cling/Interpreter/CIFactory.h"
 #include "cling/Interpreter/Interpreter.h"
 #include "cling/Interpreter/InterpreterCallbacks.h"
 #include "cling/Interpreter/LookupHelper.h"
@@ -224,8 +225,11 @@ const char *rootClingHelp =
 #include "clang/Basic/MemoryBufferCache.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendActions.h"
+#include "clang/Frontend/MultiplexConsumer.h"
+#include "clang/Frontend/TextDiagnosticPrinter.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/Preprocessor.h"
+#include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Lex/ModuleMap.h"
 #include "clang/Lex/Pragma.h"
 #include "clang/Sema/Sema.h"
@@ -234,6 +238,7 @@ const char *rootClingHelp =
 
 #include "llvm/Bitcode/BitstreamWriter.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/CrashRecoveryContext.h"
 
 #include "RtypesCore.h"
 #include "TModuleGenerator.h"
@@ -522,7 +527,7 @@ void AnnotateFieldDecl(clang::FieldDecl &decl,
 
 void AnnotateDecl(clang::CXXRecordDecl &CXXRD,
                   const RScanner::DeclsSelRulesMap_t &declSelRulesMap,
-                  cling::Interpreter &interpreter,
+                  clang::Sema& Sema,
                   bool isGenreflex)
 {
    // In order to store the meaningful for the IO comments we have to transform
@@ -535,7 +540,6 @@ void AnnotateDecl(clang::CXXRecordDecl &CXXRD,
    llvm::StringRef comment;
 
    ASTContext &C = CXXRD.getASTContext();
-   Sema &S = interpreter.getCI()->getSema();
 
    SourceRange commentRange;
 
@@ -578,7 +582,7 @@ void AnnotateDecl(clang::CXXRecordDecl &CXXRD,
 
          // For now we allow only a special macro (ClassDef) to have meaningful comments
          SourceLocation maybeMacroLoc = (*I)->getLocation();
-         bool isClassDefMacro = maybeMacroLoc.isMacroID() && S.findMacroSpelling(maybeMacroLoc, "ClassDef");
+         bool isClassDefMacro = maybeMacroLoc.isMacroID(); //TODO && Sema.findMacroSpelling(maybeMacroLoc, "ClassDef");
          if (isClassDefMacro) {
             while (isa<NamedDecl>(*I) && cast<NamedDecl>(*I)->getName() != "DeclFileLine") {
                ++I;
@@ -2239,6 +2243,278 @@ static bool GenerateAllDict(TModuleGenerator &modGen, clang::CompilerInstance *c
    return WriteAST(modGen.GetModuleFileName(), compilerInstance, iSysRoot);
 }
 
+void AnnotateAllDeclsForPCH(clang::Sema& Sema, RScanner &scan);
+
+namespace {
+
+  RScanner *gModuleScanner;
+
+  class ScannerConsumer : public ASTConsumer {
+  public:
+    clang::CompilerInstance *Instance = nullptr;
+    ScannerConsumer(clang::CompilerInstance& CI) : Instance(&CI) {}
+    virtual void HandleTranslationUnit(ASTContext &Ctx) override {
+      clang::Sema &Sema = Instance->getSema();
+
+      RScanner scan(selectionRules,
+                    scanType,
+                    interp,
+                    normCtxt,
+                    scannerVerbLevel);
+      scan.Scan(Ctx);
+      AnnotateAllDeclsForPCH(Sema, *gModuleScanner);
+    }
+  };
+
+  class GenerateROOTModuleAction : public ASTFrontendAction {
+    virtual std::unique_ptr<raw_pwrite_stream>
+    CreateOutputFile(CompilerInstance &CI, StringRef InFile) = 0;
+
+    clang::CompilerInstance *Instance = nullptr;
+
+  protected:
+    std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI,
+                                                   StringRef InFile) override;
+
+    virtual bool BeginSourceFileAction(CompilerInstance &CI,
+                                       StringRef Filename) override {
+      Instance = &CI;
+      return true;
+    }
+
+    TranslationUnitKind getTranslationUnitKind() override {
+      return TU_Module;
+    }
+
+    bool hasASTFileSupport() const override { return false; }
+  };
+
+  class GenerateROOTModuleFromModuleMapAction : public GenerateROOTModuleAction {
+  private:
+    bool BeginSourceFileAction(CompilerInstance &CI, StringRef Filename) override;
+
+    std::unique_ptr<raw_pwrite_stream>
+    CreateOutputFile(CompilerInstance &CI, StringRef InFile) override;
+  };
+
+
+  std::unique_ptr<ASTConsumer>
+  GenerateROOTModuleAction::CreateASTConsumer(CompilerInstance &CI,
+                                          StringRef InFile) {
+    std::unique_ptr<raw_pwrite_stream> OS = CreateOutputFile(CI, InFile);
+    if (!OS)
+      return nullptr;
+
+    std::string OutputFile = CI.getFrontendOpts().OutputFile;
+    std::string Sysroot;
+
+    auto Buffer = std::make_shared<PCHBuffer>();
+    std::vector<std::unique_ptr<ASTConsumer>> Consumers;
+
+    assert(Instance);
+    Consumers.push_back(llvm::make_unique<ScannerConsumer>(*Instance));
+    Consumers.push_back(llvm::make_unique<PCHGenerator>(
+                          CI.getPreprocessor(), OutputFile, Sysroot,
+                          Buffer, CI.getFrontendOpts().ModuleFileExtensions,
+                          /*AllowASTWithErrors=*/false,
+                          /*IncludeTimestamps=*/
+                            +CI.getFrontendOpts().BuildingImplicitModule));
+    Consumers.push_back(CI.getPCHContainerWriter().CreatePCHContainerGenerator(
+        CI, InFile, OutputFile, std::move(OS), Buffer));
+    return llvm::make_unique<MultiplexConsumer>(std::move(Consumers));
+  }
+
+  bool GenerateROOTModuleFromModuleMapAction::BeginSourceFileAction(
+      CompilerInstance &CI, StringRef Filename) {
+    return GenerateROOTModuleAction::BeginSourceFileAction(CI, Filename);
+  }
+
+  std::unique_ptr<raw_pwrite_stream>
+  GenerateROOTModuleFromModuleMapAction::CreateOutputFile(CompilerInstance &CI,
+                                                      StringRef InFile) {
+    // If no output file was provided, figure out where this module would go
+    // in the module cache.
+    if (CI.getFrontendOpts().OutputFile.empty()) {
+      StringRef ModuleMapFile = CI.getFrontendOpts().OriginalModuleMap;
+      if (ModuleMapFile.empty())
+        ModuleMapFile = InFile;
+
+      HeaderSearch &HS = CI.getPreprocessor().getHeaderSearchInfo();
+      CI.getFrontendOpts().OutputFile =
+          HS.getModuleFileName(CI.getLangOpts().CurrentModule, ModuleMapFile,
+                               /*UsePrebuiltPath=*/false);
+    }
+
+    // We use createOutputFile here because this is exposed via libclang, and we
+    // must disable the RemoveFileOnSignal behavior.
+    // We use a temporary to avoid race conditions.
+    return CI.createOutputFile(CI.getFrontendOpts().OutputFile, /*Binary=*/true,
+                               /*RemoveFileOnSignal=*/false, InFile,
+                               /*Extension=*/"", /*useTemporary=*/true,
+                               /*CreateMissingDirectories=*/true);
+  }
+
+}
+
+/// \brief Compile a module file for the given module, using the options 
+/// provided by the importing compiler instance. Returns true if the module
+/// was built without errors.
+static bool compileModuleImpl(CompilerInstance &ImportingInstance,
+                              SourceLocation ImportLoc,
+                              Module *Module,
+                              StringRef ModuleFileName) {
+  ModuleMap &ModMap
+    = ImportingInstance.getPreprocessor().getHeaderSearchInfo().getModuleMap();
+
+  //std::cout << "Generating " << ModuleFileName.str() << std::endl;
+
+  // Construct a compiler invocation for creating this module.
+  auto Invocation =
+      std::make_shared<CompilerInvocation>(ImportingInstance.getInvocation());
+
+  PreprocessorOptions &PPOpts = Invocation->getPreprocessorOpts();
+
+  // For any options that aren't intended to affect how a module is built,
+  // reset them to their default values.
+  Invocation->getLangOpts()->resetNonModularOptions();
+  PPOpts.resetNonModularOptions();
+
+  // Remove any macro definitions that are explicitly ignored by the module.
+  // They aren't supposed to affect how the module is built anyway.
+  HeaderSearchOptions &HSOpts = Invocation->getHeaderSearchOpts();
+  PPOpts.Macros.erase(
+      std::remove_if(PPOpts.Macros.begin(), PPOpts.Macros.end(),
+                     [&HSOpts](const std::pair<std::string, bool> &def) {
+        StringRef MacroDef = def.first;
+        return HSOpts.ModulesIgnoreMacros.count(
+                   llvm::CachedHashString(MacroDef.split('=').first)) > 0;
+      }),
+      PPOpts.Macros.end());
+
+  // Note the name of the module we're building.
+  Invocation->getLangOpts()->CurrentModule = Module->getTopLevelModuleName();
+
+  // Make sure that the failed-module structure has been allocated in
+  // the importing instance, and propagate the pointer to the newly-created
+  // instance.
+  PreprocessorOptions &ImportingPPOpts
+    = ImportingInstance.getInvocation().getPreprocessorOpts();
+  if (!ImportingPPOpts.FailedModules)
+    ImportingPPOpts.FailedModules =
+        std::make_shared<PreprocessorOptions::FailedModulesSet>();
+  PPOpts.FailedModules = ImportingPPOpts.FailedModules;
+
+  // If there is a module map file, build the module using the module map.
+  // Set up the inputs/outputs so that we build the module from its umbrella
+  // header.
+  FrontendOptions &FrontendOpts = Invocation->getFrontendOpts();
+  FrontendOpts.OutputFile = ModuleFileName.str();
+  FrontendOpts.DisableFree = false;
+  FrontendOpts.GenerateGlobalModuleIndex = false;
+  FrontendOpts.BuildingImplicitModule = true;
+  FrontendOpts.OriginalModuleMap =
+      ModMap.getModuleMapFileForUniquing(Module)->getName();
+  // Force implicitly-built modules to hash the content of the module file.
+  HSOpts.ModulesHashContent = true;
+  FrontendOpts.Inputs.clear();
+  InputKind IK(InputKind::CXX, InputKind::ModuleMap);
+
+  // Don't free the remapped file buffers; they are owned by our caller.
+  PPOpts.RetainRemappedFileBuffers = true;
+    
+  Invocation->getDiagnosticOpts().VerifyDiagnostics = 0;
+  assert(ImportingInstance.getInvocation().getModuleHash() ==
+         Invocation->getModuleHash() && "Module hash mismatch!");
+  
+  // Construct a compiler instance that will be used to actually create the
+  // module.  Since we're sharing a PCMCache,
+  // CompilerInstance::CompilerInstance is responsible for finalizing the
+  // buffers to prevent use-after-frees.
+  CompilerInstance Instance(ImportingInstance.getPCHContainerOperations(),
+                            &ImportingInstance.getPreprocessor().getPCMCache());
+  auto &Inv = *Invocation;
+  Instance.setInvocation(std::move(Invocation));
+
+  Instance.createDiagnostics(new ForwardingDiagnosticConsumer(
+                                   ImportingInstance.getDiagnosticClient()),
+                             /*ShouldOwnClient=*/true);
+
+  Instance.setVirtualFileSystem(&ImportingInstance.getVirtualFileSystem());
+
+  // Note that this module is part of the module build stack, so that we
+  // can detect cycles in the module graph.
+  Instance.setFileManager(&ImportingInstance.getFileManager());
+  Instance.createSourceManager(Instance.getFileManager());
+  SourceManager &SourceMgr = Instance.getSourceManager();
+  SourceMgr.setModuleBuildStack(
+    ImportingInstance.getSourceManager().getModuleBuildStack());
+  SourceMgr.pushModuleBuildStack(Module->getTopLevelModuleName(),
+    FullSourceLoc(ImportLoc, ImportingInstance.getSourceManager()));
+
+  // If we're collecting module dependencies, we need to share a collector
+  // between all of the module CompilerInstances. Other than that, we don't
+  // want to produce any dependency output from the module build.
+  Instance.setModuleDepCollector(ImportingInstance.getModuleDepCollector());
+  Inv.getDependencyOutputOpts() = DependencyOutputOptions();
+
+  // Get or create the module map that we'll use to build this module.
+  std::string InferredModuleMapContent;
+  if (const FileEntry *ModuleMapFile =
+          ModMap.getContainingModuleMapFile(Module)) {
+    // Use the module map where this module resides.
+    FrontendOpts.Inputs.emplace_back(ModuleMapFile->getName(), IK,
+                                     +Module->IsSystem);
+  } else {
+    SmallString<128> FakeModuleMapFile(Module->Directory->getName());
+    llvm::sys::path::append(FakeModuleMapFile, "__inferred_module.map");
+    FrontendOpts.Inputs.emplace_back(FakeModuleMapFile, IK, +Module->IsSystem);
+
+    llvm::raw_string_ostream OS(InferredModuleMapContent);
+    Module->print(OS);
+    OS.flush();
+
+    std::unique_ptr<llvm::MemoryBuffer> ModuleMapBuffer =
+        llvm::MemoryBuffer::getMemBuffer(InferredModuleMapContent);
+    ModuleMapFile = Instance.getFileManager().getVirtualFile(
+        FakeModuleMapFile, InferredModuleMapContent.size(), 0);
+    SourceMgr.overrideFileContents(ModuleMapFile, std::move(ModuleMapBuffer));
+  }
+
+  /*ImportingInstance.getDiagnostics().Report(ImportLoc,
+                                            diag::remark_module_build)
+    << Module->Name << ModuleFileName;
+  */
+  // Execute the action to actually build the module in-place. Use a separate
+  // thread so that we get a stack large enough.
+  const unsigned ThreadStackSize = 8 << 20;
+  llvm::CrashRecoveryContext CRC;
+  CRC.RunSafelyOnThread(
+      [&]() {
+        GenerateROOTModuleFromModuleMapAction Action;
+        Instance.ExecuteAction(Action);
+      },
+      ThreadStackSize);
+
+/*  ImportingInstance.getDiagnostics().Report(ImportLoc,
+                                            diag::remark_module_build_done)
+    << Module->Name;
+*/
+  // Delete the temporary module map file.
+  // FIXME: Even though we're executing under crash protection, it would still
+  // be nice to do this with RemoveFileOnSignal when we can. However, that
+  // doesn't make sense for all clients, so clean this up manually.
+  Instance.clearOutputFiles(/*EraseFiles=*/true);
+
+  // We've rebuilt a module. If we're allowed to generate or update the global
+  // module index, record that fact in the importing compiler instance.
+  if (ImportingInstance.getFrontendOpts().GenerateGlobalModuleIndex) {
+    ImportingInstance.setBuildGlobalModuleIndex(true);
+  }
+
+  return !Instance.getDiagnostics().hasErrorOccurred();
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Returns true iff a given module (and its submodules) contains all headers
 /// needed by the given ModuleGenerator.
@@ -2287,14 +2563,81 @@ static bool ModuleContainsHeaders(TModuleGenerator &modGen, clang::Module *modul
    return foundAllHeaders;
 }
 
+class IgnoreConsumer : public clang::ASTConsumer {};
+
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Generates a module from the given ModuleGenerator and CompilerInstance.
 /// Returns true iff the PCM was succesfully generated.
-static bool GenerateModule(TModuleGenerator &modGen, clang::CompilerInstance *CI)
+static bool GenerateModule(TModuleGenerator &modGen, const std::string &resourceDir, std::vector<const char *> clingArgsC)
 {
+  return true;
    assert(!modGen.IsPCH() && "modGen must not be in PCH mode");
 
+   if (StringRef(modGen.GetModuleFileName()).contains("32"))
+     return true;
+
    std::string outputFile = modGen.GetModuleFileName();
+   // Try to get the module name in the modulemap based on the filepath.
+   StringRef moduleName = llvm::sys::path::filename(outputFile);
+   moduleName.consume_front("lib");
+   moduleName.consume_back("_rdict.pcm");
+
+   const std::unordered_set<std::string> IgnoredModules = {
+     "vectorDict",
+     "listDict",
+     "forward_listDict",
+     "dequeDict",
+     "mapDict",
+     "map2Dict",
+     "unordered_mapDict",
+     "multimapDict",
+     "multimap2Dict",
+     "unordered_multimapDict",
+     "setDict",
+     "unordered_setDict",
+     "multisetDict",
+     "unordered_multisetDict",
+     "complexDict",
+     "valarrayDict",
+     "TMVA",
+     "PyMVA",
+     "TMVAGui",
+     "Genetic",
+     "Foam",
+     "RGL"
+   };
+   if (IgnoredModules.find(moduleName) != IgnoredModules.end())
+     return true;
+   //std::cerr << moduleName.str() << std::endl;
+
+
+   clingArgsC.push_back("-fmodules");
+   //clingArgsC.push_back("-resource-dir");
+   //clingArgsC.push_back(resourceDir.c_str());
+   //clingArgsC.push_back(0); // signal end of array
+   std::string IncludeEtcDir = std::string("-I") + gDriverConfig->fTROOT__GetEtcDir();
+   clingArgsC.push_back(IncludeEtcDir.c_str());
+
+  /*const char ** &extraArgs = *gDriverConfig->fTROOT__GetExtraInterpreterArgs();
+  extraArgs = &clingArgsC[1]; // skip binary name
+  interpPtr = gDriverConfig->fTCling__GetInterpreter();
+  if (!isGenreflex && !onepcm) {
+     std::unique_ptr<TRootClingCallbacks> callBacks (new TRootClingCallbacks(interpPtr, filesIncludedByLinkdef));
+     interpPtr->setCallbacks(std::move(callBacks));
+  } */
+
+   clang::CompilerInstance *CI = cling::CIFactory::createCI(llvm::MemoryBuffer::getMemBuffer(""), clingArgsC.size(), &clingArgsC[0], resourceDir.c_str(), new IgnoreConsumer, false);
+   //CI->createDiagnostics(new clang::TextDiagnosticPrinter(llvm::errs(), new clang::DiagnosticOptions()));
+   CI->createSema(clang::TU_Module, nullptr);
+
+   CI->getHeaderSearchOpts().PrebuiltModulePaths.clear();
+   assert(getenv("ROOT_CACHE") && "Didn't set ROOT_CACHE env variable before invocking rootcling.");
+   CI->getHeaderSearchOpts().ModuleCachePath = getenv("ROOT_CACHE");
+
+   DiagnosticConsumer& DClient = CI->getDiagnosticClient();
+   DClient.BeginSourceFile(CI->getLangOpts(), &CI->getPreprocessor());
+
    std::string includeDir = gDriverConfig->fTROOT__GetIncludeDir();
    clang::HeaderSearch &headerSearch = CI->getPreprocessor().getHeaderSearchInfo();
    auto &fileMgr = headerSearch.getFileMgr();
@@ -2314,14 +2657,6 @@ static bool GenerateModule(TModuleGenerator &modGen, clang::CompilerInstance *CI
 
    moduleMap.parseModuleMapFile(moduleFile, false, fileMgr.getDirectory(includeDir));
 
-   // Try to get the module name in the modulemap based on the filepath.
-   std::string moduleName = llvm::sys::path::filename(outputFile);
-   // For module "libCore.so" we have the file name "libCore_rdict.pcm".
-   // We replace this suffix with ".so" to get the name in the modulefile.
-   if (StringRef(moduleName).endswith("_rdict.pcm")) {
-      auto lengthWithoutSuffix = moduleName.size() - strlen("_rdict.pcm");
-      moduleName = moduleName.substr(0, lengthWithoutSuffix) + ".so";
-   }
 
    // Actually lookup the module on the computed module name.
    clang::Module *module = moduleMap.findModule(moduleName);
@@ -2329,9 +2664,11 @@ static bool GenerateModule(TModuleGenerator &modGen, clang::CompilerInstance *CI
    // Inform the user and abort if we can't find a module with a given name.
    if (!module) {
       ROOT::TMetaUtils::Error("GenerateModule", "Couldn't find module with name '%s' in modulemap!\n",
-                              moduleName.c_str());
+                              moduleName.str().c_str());
       return false;
    }
+
+   CI->getLangOpts().CurrentModule = module->Name;
 
    // Check if the loaded module covers all headers that were specified
    // by the user on the command line. This is an integrity check to
@@ -2349,7 +2686,8 @@ static bool GenerateModule(TModuleGenerator &modGen, clang::CompilerInstance *CI
       ROOT::TMetaUtils::Warning("GenerateModule", warningMessage.c_str());
    }
 
-   return WriteAST(outputFile, CI, "", module);
+   outputFile = llvm::sys::path::parent_path(outputFile).str() + "/" + module->Name + ".pcm";
+   return compileModuleImpl(*CI, SourceLocation(), module, outputFile);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2939,7 +3277,7 @@ void ExtractSelectedNamespaces(RScanner &scan, std::list<std::string> &nsList)
 ////////////////////////////////////////////////////////////////////////////////
 /// We need annotations even in the PCH: // !, // || etc.
 
-void AnnotateAllDeclsForPCH(cling::Interpreter &interp,
+void AnnotateAllDeclsForPCH(clang::Sema& Sema,
                             RScanner &scan)
 {
    auto const & declSelRulesMap = scan.GetDeclsSelRulesMap();
@@ -2947,7 +3285,7 @@ void AnnotateAllDeclsForPCH(cling::Interpreter &interp,
       // Very important: here we decide if we want to attach attributes to the decl.
       if (clang::CXXRecordDecl *CXXRD =
                llvm::dyn_cast<clang::CXXRecordDecl>(const_cast<clang::RecordDecl *>(selClass.GetRecordDecl()))) {
-         AnnotateDecl(*CXXRD, declSelRulesMap, interp, false);
+         AnnotateDecl(*CXXRD, declSelRulesMap, Sema, false);
       }
    }
 }
@@ -3056,7 +3394,7 @@ int GenerateFullDict(std::ostream &dictStream,
 
       if (clang::CXXRecordDecl *CXXRD =
                llvm::dyn_cast<clang::CXXRecordDecl>(const_cast<clang::RecordDecl *>(selClass.GetRecordDecl()))) {
-         AnnotateDecl(*CXXRD, scan.GetDeclsSelRulesMap() , interp, isGenreflex);
+         AnnotateDecl(*CXXRD, scan.GetDeclsSelRulesMap() , interp.getCI()->getSema(), isGenreflex);
       }
 
       const clang::CXXRecordDecl *CRD = llvm::dyn_cast<clang::CXXRecordDecl>(selClass.GetRecordDecl());
@@ -3408,6 +3746,8 @@ std::list<std::string> RecordDecl2Headers(const clang::CXXRecordDecl &rcd,
       const cling::Interpreter &interp,
       std::set<const clang::CXXRecordDecl *> &visitedDecls)
 {
+   // We push a new transaction because we could deserialize decls here
+   cling::Interpreter::PushTransactionRAII RAII(&interp);
    std::list<std::string> headers;
 
    // Avoid infinite recursion
@@ -3851,6 +4191,8 @@ public:
 
 
 
+
+
 ////////////////////////////////////////////////////////////////////////////////
 
 int RootClingMain(int argc,
@@ -4024,6 +4366,8 @@ int RootClingMain(int argc,
    }
 
    std::vector<std::string> clingArgs;
+   std::vector<const char*> ModuleArgs;
+
    clingArgs.push_back(argv[0]);
    clingArgs.push_back("-iquote.");
 
@@ -4043,6 +4387,7 @@ int RootClingMain(int argc,
    std::vector<std::string> rootmapLibNames;
    std::string rootmapFileName;
    std::vector<std::string> excludePaths;
+
 
    bool inlineInputHeader = false;
    bool interpreteronly = false;
@@ -4173,6 +4518,7 @@ int RootClingMain(int argc,
             if (strcmp("-p", argv[ic])) {
                CheckForMinusW(argv[ic], diagnosticPragmas);
                clingArgs.push_back(argv[ic]);
+               ModuleArgs.push_back(argv[ic]);
             }
          }
       } else if (nextStart == 0) {
@@ -4252,6 +4598,10 @@ int RootClingMain(int argc,
       clingArgsC.push_back("-resource-dir");
       clingArgsC.push_back(resourceDir.c_str());
       clingArgsC.push_back(0); // signal end of array
+
+      ModuleArgs.push_back("-resource-dir");
+      ModuleArgs.push_back(resourceDir.c_str());
+
       const char ** &extraArgs = *gDriverConfig->fTROOT__GetExtraInterpreterArgs();
       extraArgs = &clingArgsC[1]; // skip binary name
       interpPtr = gDriverConfig->fTCling__GetInterpreter();
@@ -4325,16 +4675,6 @@ int RootClingMain(int argc,
    ROOT::TMetaUtils::TClingLookupHelper helper(interp, normCtxt, 0, 0);
    TClassEdit::Init(&helper);
 
-   // flags used only for the pragma parser:
-   clingArgs.push_back("-D__CINT__");
-   clingArgs.push_back("-D__MAKECINT__");
-#ifdef R__WIN32
-   // Prevent the following #error: The C++ Standard Library forbids macroizing keywords.
-   clingArgs.push_back("-D_XKEYCHECK_H");
-#endif
-
-   AddPlatformDefines(clingArgs);
-
    std::string interpPragmaSource;
    std::string includeForSource;
    std::string interpreterDeclarations;
@@ -4400,6 +4740,16 @@ int RootClingMain(int argc,
          }
       }
    }
+
+   // flags used only for the pragma parser:
+   clingArgs.push_back("-D__CINT__");
+   clingArgs.push_back("-D__MAKECINT__");
+#ifdef R__WIN32
+   // Prevent the following #error: The C++ Standard Library forbids macroizing keywords.
+   clingArgs.push_back("-D_XKEYCHECK_H");
+#endif
+
+   AddPlatformDefines(clingArgs);
 
    if (gDriverConfig->fAddAncestorPCMROOTFile) {
       for (const auto & baseModule : baseModules)
@@ -4711,6 +5061,8 @@ int RootClingMain(int argc,
                  normCtxt,
                  scannerVerbLevel);
 
+   gModuleScanner = &scan;
+
    // If needed initialize the autoloading hook
    if (liblistPrefix.length()) {
       LoadLibraryMap(liblistPrefix + ".in", gAutoloads);
@@ -4721,7 +5073,13 @@ int RootClingMain(int argc,
       selectionRules.SetDeep(true);
    }
 
-   scan.Scan(CI->getASTContext());
+
+   {
+      // We push a new transaction because we could deserialize decls here
+      cling::Interpreter::PushTransactionRAII RAII(&interp);
+      // Inspect the AST
+      scan.Scan(CI->getASTContext());
+   }
 
    bool has_input_error = false;
 
@@ -4793,7 +5151,7 @@ int RootClingMain(int argc,
    }
 
    if (onepcm) {
-      AnnotateAllDeclsForPCH(interp, scan);
+      AnnotateAllDeclsForPCH(interp.getCI()->getSema(), scan);
    } else if (interpreteronly) {
       rootclingRetCode += CheckClassesForInterpreterOnlyDicts(interp, scan);
       // generate an empty pcm nevertheless for consistency
@@ -4865,8 +5223,6 @@ int RootClingMain(int argc,
          // Write the module/PCH depending on what mode we are on
          if (modGen.IsPCH()) {
             if (!GenerateAllDict(modGen, CI, currentDirectory)) return 1;
-         } else if (getenv("ROOT_MODULES")) {
-            if (!GenerateModule(modGen, CI)) return 1;
          }
       }
    }
@@ -4978,6 +5334,10 @@ int RootClingMain(int argc,
 
    // Before returning, rename the files
    rootclingRetCode += tmpCatalog.commit();
+
+   if (!modGen.IsPCH() && getenv("ROOT_MODULES")) {
+      if (!GenerateModule(modGen, resourceDir, ModuleArgs)) return 1;
+   }
 
    return rootclingRetCode;
 
