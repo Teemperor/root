@@ -32,6 +32,12 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Sema/Lookup.h"
+#include "clang/Sema/Sema.h"
+#include "clang/Lex/Preprocessor.h"
+
+#include "cling/Interpreter/Interpreter.h"
 
 #ifdef _WIN32
 #include "process.h"
@@ -175,6 +181,230 @@ void BaseSelectionRule::PrintAttributes(std::ostream &out, int level) const
    }
 }
 
+namespace {
+
+
+  NamedDecl* Named(Sema* S, const DeclarationName& Name,
+                           const DeclContext* Within) {
+    LookupResult R(*S, Name, SourceLocation(), Sema::LookupOrdinaryName,
+                   Sema::ForRedeclaration);
+    R.suppressDiagnostics();
+    if (!Within)
+      S->LookupName(R, S->TUScope);
+    else {
+      const DeclContext* primaryWithin = nullptr;
+      if (const clang::TagDecl *TD = dyn_cast<clang::TagDecl>(Within)) {
+        primaryWithin = dyn_cast_or_null<DeclContext>(TD->getDefinition());
+      } else {
+        primaryWithin = Within->getPrimaryContext();
+      }
+      if (!primaryWithin) {
+        // No definition, no lookup result.
+        return 0;
+      }
+      S->LookupQualifiedName(R, const_cast<DeclContext*>(primaryWithin));
+    }
+
+    if (R.empty())
+      return 0;
+
+    R.resolveKind();
+
+    if (R.isSingleResult())
+      return R.getFoundDecl();
+    return 0;
+  }
+
+  NamedDecl* Named(Sema* S, const char* Name,
+                           const DeclContext* Within) {
+    DeclarationName DName = &S->Context.Idents.get(Name);
+    return Named(S, DName, Within);
+  }
+
+  NamedDecl* Named(Sema* S, llvm::StringRef Name,
+                           const DeclContext* Within) {
+    DeclarationName DName = &S->Context.Idents.get(Name);
+    return Named(S, DName, Within);
+  }
+
+
+  DeclContext* getCompleteContext(const Decl* scopeDecl,
+                                  ASTContext& Context, Sema &S) {
+    //
+    //  Some validity checks on the passed decl.
+    //
+    DeclContext* foundDC = dyn_cast<DeclContext>(const_cast<Decl*>(scopeDecl));
+    if (foundDC->isDependentContext()) {
+      // Passed decl is a template, we cannot use it.
+      return 0;
+    }
+    if (scopeDecl->isInvalidDecl()) {
+      // if the decl is invalid try to clean up
+      return 0;
+    }
+    //
+    //  Convert the passed decl into a nested name specifier,
+    //  a scope spec, and a decl context.
+    //
+    NestedNameSpecifier* classNNS = 0;
+    if (isa<NamespaceDecl>(scopeDecl)) {
+      return foundDC;
+    }
+    else if (const RecordDecl* RD = dyn_cast<RecordDecl>(scopeDecl)) {
+      if (RD->getDefinition()) {
+        // We are already complete, we are done.
+        return foundDC;
+      } else {
+        //const Type* T = Context.getRecordType(RD).getTypePtr();
+        const Type* T = Context.getTypeDeclType(RD).getTypePtr();
+        classNNS = NestedNameSpecifier::Create(Context, 0, false, T);
+        // We pass a 'random' but valid source range.
+        CXXScopeSpec SS;
+        SS.MakeTrivial(Context, classNNS, scopeDecl->getSourceRange());
+
+        if (S.RequireCompleteDeclContext(SS, foundDC)) {
+          // Forward decl or instantiation failure, we cannot use it.
+          return 0;
+        }
+      }
+    }
+    else if (llvm::isa<TranslationUnitDecl>(scopeDecl)) {
+      return dyn_cast<DeclContext>(const_cast<Decl*>(scopeDecl));
+    }
+    else {
+      // Not a namespace or class, we cannot use it.
+      return 0;
+    }
+
+    return foundDC;
+  }
+
+  const TagDecl* RequireCompleteDeclContext(Sema& S, Preprocessor& PP,
+                                                   const TagDecl *tobeCompleted)
+  {
+    // getContextAndSpec create the CXXScopeSpec and requires the scope
+    // to be complete, so this is exactly what we need.
+
+    bool OldSuppressAllDiagnostics(PP.getDiagnostics()
+                                   .getSuppressAllDiagnostics());
+    PP.getDiagnostics().setSuppressAllDiagnostics(true);
+
+    ASTContext& Context = S.getASTContext();
+    DeclContext* complete = getCompleteContext(tobeCompleted,Context,S);
+
+    PP.getDiagnostics().setSuppressAllDiagnostics(OldSuppressAllDiagnostics);
+
+    if (!complete)
+      return 0;
+    if (const TagDecl *result = dyn_cast<TagDecl>(complete))
+      return result->getDefinition();
+    return 0;
+  }
+
+  bool quickFindDecl(llvm::StringRef declName,
+                            const Decl *& resultDecl,
+                            Sema &S, Preprocessor &PP) {
+    resultDecl = nullptr;
+    const clang::DeclContext *sofar = nullptr;
+    const clang::Decl *next = nullptr;
+    for (size_t c = 0, last = 0; c < declName.size(); ++c) {
+      const char current = declName[c];
+      if (current == '<' || current == '>' ||
+          current == ' ' || current == '&' ||
+          current == '*' || current == '[' ||
+          current == ']') {
+        // For now we do not know how to deal with
+        // template instances.
+        return false;
+      }
+      if (current == ':') {
+        if (c + 2 >= declName.size() || declName[c + 1] != ':') {
+          // Looks like an invalid name, we won't find anything.
+          return true;
+        }
+        next = Named(&S, declName.substr(last, c - last), sofar);
+        if (next == (void *) -1) {
+          // Ambiguous result, we need to go through the long path
+          return false;
+        } else if (next && next != (void *) -1) {
+          // Need to handle typedef here too.
+          const TypedefNameDecl *typedefDecl = dyn_cast<TypedefNameDecl>(next);
+          if (typedefDecl) {
+            // We are stripping the typedef, this is technically incorrect,
+            // as the result (if resultType has been specified) will not be
+            // an accurate representation of the input string.
+            // As we strip the typedef we ought to rebuild the nested name
+            // specifier.
+            // Since we do not use this path for template handling, this
+            // is not relevant for ROOT itself ....
+            ASTContext &Context = S.getASTContext();
+            QualType T = Context.getTypedefType(typedefDecl);
+            const TagType *TagTy = T->getAs<TagType>();
+            if (TagTy) next = TagTy->getDecl();
+          }
+
+          // To use Lookup::Named we need to fit the assertion:
+          //    ((!isa<TagDecl>(LookupCtx) || LookupCtx->isDependentContext()
+          //     || cast<TagDecl>(LookupCtx)->isCompleteDefinition()
+          //     || cast<TagDecl>(LookupCtx)->isBeingDefined()) &&
+          //      "Declaration context must already be complete!"),
+          //      function LookupQualifiedName, file SemaLookup.cpp, line 1614.
+          const clang::TagDecl *tdecl = dyn_cast<TagDecl>(next);
+          if (tdecl && !(next = tdecl->getDefinition())) {
+            //fprintf(stderr,"Incomplete (inner) type for %s (part %s).\n",
+            //        declName.str().c_str(),
+            //        declName.substr(last,c-last).str().c_str());
+            // Incomplete type we will not be able to go on.
+
+            // We always require completeness of the scope, if the caller
+            // want piece-meal instantiation, the calling code will need to
+            // split the call to findScope.
+
+            // if (instantiateTemplate) {
+            if (dyn_cast<ClassTemplateSpecializationDecl>(tdecl)) {
+              // Go back to the normal schedule since we need a valid point
+              // of instantiation:
+              // Assertion failed: (Loc.isValid() &&
+              //    "point of instantiation must be valid!"),
+              //    function setPointOfInstantiation, file DeclTemplate.h,
+              //    line 1520.
+              // Which can happen here because the simple name maybe a
+              // typedef to a template (for example std::string).
+              return false;
+            }
+            next = RequireCompleteDeclContext(S, PP, tdecl);
+            // } else {
+            //   return false;
+            // }
+          }
+          sofar = dyn_cast_or_null<DeclContext>(next);
+        } else {
+          sofar = 0;
+        }
+        if (!sofar) {
+          // We are looking into something that is not a decl context,
+          // so we won't find anything.
+          return true;
+        }
+        last = c + 2;
+        ++c; // Consume the second ':'
+      } else if (c + 1 == declName.size()) {
+        // End of the line.
+        next = Named(&S, declName.substr(last, c + 1 - last), sofar);
+        // If there is an ambiguity, we need to go the long route.
+        if (next == (void *) -1) return false;
+        if (next) {
+          resultDecl = next;
+        }
+        return true;
+      }
+    } // for each characters
+    // Should be unreacheable.
+    return false;
+  }
+
+}
+
 void BaseSelectionRule::PrintAttributes(int level) const
 {
    PrintAttributes(std::cout, level);
@@ -234,6 +464,26 @@ BaseSelectionRule::EMatchType BaseSelectionRule::Match(const clang::NamedDecl *d
          const clang::CXXRecordDecl *target
             = fHasFromTypedefAttribute ? nullptr : ROOT::TMetaUtils::ScopeSearch(name_value.c_str(), *fInterp,
                                                    true /*diagnose*/, 0);
+
+         const Decl *newTargetD;
+         auto Found = quickFindDecl(name_value, newTargetD, fInterp->getSema(), fInterp->getSema().getPreprocessor());
+
+         clang::NamedDecl* newTarget = (NamedDecl*) newTargetD;
+         bool correctLookup = true;
+         if (target != newTarget) {
+           if (target == nullptr || newTarget == nullptr)
+             correctLookup = false;
+           else
+             correctLookup = target->getCanonicalDecl() == newTarget->getCanonicalDecl();
+         }
+         if (!correctLookup) {
+            std::cerr << (target ? target->getQualifiedNameAsString() : "null") << " by " << name_value << " and ";
+            std::cerr << (newTarget ? newTarget->getQualifiedNameAsString() : "null") << ", Found " << Found << std::endl;
+            //if (target)
+            //  target->dumpColor();
+            //if (newTarget)
+            //  newTarget->dumpColor();
+         }
 
          if ( target ) {
             const_cast<BaseSelectionRule*>(this)->fCXXRecordDecl = target;
