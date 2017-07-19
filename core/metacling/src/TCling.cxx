@@ -3702,6 +3702,12 @@ void TCling::UpdateListOfDataMembers(TClass* cl) const
 {
 }
 
+void TCling::SetupModules() {
+
+  assert (getenv("ROOT_MODULES"));
+  fInterpreter->setupModules();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 /// Create list of pointers to method arguments for TMethod m.
 
