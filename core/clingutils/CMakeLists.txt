@@ -51,6 +51,10 @@ foreach(dict ${stldicts})
                                 HEADERS ${header}
                                 LINKDEF src/${dict}Linkdef.h
                                 DEPENDENCIES Core)
+  # All those dicts depend on complex, so we need fix this dependency here...
+  if (NOT "${dict}" STREQUAL "complex")
+    add_dependencies(ROOTCLING_${dict}Dict ROOTCLING_complexDict)
+  endif()
 endforeach()
 
 #---Deal with LLVM resource here----------------------------------------------
