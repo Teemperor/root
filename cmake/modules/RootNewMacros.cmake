@@ -427,9 +427,9 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
     # module. This happens for example with ROOTCLING_Smatrix which also has a
     # "Smatrix32" part.
     if (TARGET ROOTCLING_${ARG_MODULE})
-      add_dependencies(ROOTCLING_${ARG_MODULE} ${dictname})
+      add_dependencies(ROOTCLING_${ARG_MODULE} ${dictname} ${dictionary}.cxx ${rootmap_name})
     else()
-      add_custom_target(ROOTCLING_${ARG_MODULE} DEPENDS ${dictname})
+      add_custom_target(ROOTCLING_${ARG_MODULE} DEPENDS ${dictname} ${dictionary}.cxx ${rootmap_name})
     endif()
   endif()
 
