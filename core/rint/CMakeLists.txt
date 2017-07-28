@@ -6,3 +6,4 @@ ROOT_STANDARD_LIBRARY_PACKAGE(Rint
                               STAGE1
                               DICTIONARY_OPTIONS "-writeEmptyRootPCM"
                               DEPENDENCIES Core)
+add_dependencies(ROOTCLING_Rint ROOTCLING_complexDict)

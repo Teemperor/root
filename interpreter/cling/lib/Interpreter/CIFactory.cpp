@@ -519,7 +519,13 @@ static void addPaths(clang::HeaderSearchOptions& Opts, const char *EnvVar) {
   SmallVector<StringRef, 4> Paths;
   EnvVarRef.split(Paths, ':', -1, false);
   for (StringRef Path : Paths) {
-    Opts.AddPrebuiltModulePath(Path);
+    // FIXME: If we have a prebuilt module path that is equal to our module
+    // cache we fail to compile the clang builtin modules (containing stddef).
+    // We should fix this in clang, but the bug is tricky and can't be reproduced
+    // via the clang command line interface it seems?
+    if (Path != Opts.ModuleCachePath) {
+      Opts.AddPrebuiltModulePath(Path);
+    }
   }
 }
 
@@ -773,6 +779,7 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
 
     if (COpts.CxxModules && !OnlyLex) {
       argvCompile.push_back("-fmodules");
+      argvCompile.push_back("-fcxx-modules");
       argvCompile.push_back("-Xclang");
       argvCompile.push_back("-fmodules-local-submodule-visibility");
       argvCompile.push_back("-fcolor-diagnostics");
@@ -789,7 +796,7 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
       argvCompile.push_back("-fPIC");
 
       if (llvm::StringRef(getenv("ROOT_MODULES")) == "DEBUG") {
-          argvCompile.push_back("-Rmodule-build");
+        argvCompile.push_back("-Rmodule-build");
       }
     }
 
@@ -986,7 +993,7 @@ static void stringifyPreprocSetting(PreprocessorOptions& PPOpts,
 
     Invocation.getFrontendOpts().DisableFree = true;
 
-    if (COpts.CxxModules && COpts.ModuleName.empty() && !OnlyLex) {
+    if (COpts.CxxModules && !OnlyLex) {
       addPaths(CI->getHeaderSearchOpts(), getenv("LD_LIBRARY_PATH"));
       addPaths(CI->getHeaderSearchOpts(), getenv("DYLD_LIBRARY_PATH"));
     }

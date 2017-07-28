@@ -126,6 +126,7 @@ Bool_t TSchemaRuleSet::AddRule( TSchemaRule* rule, EConsistencyCheck checkConsis
             if (checkConsistency == kCheckAll) {
                if (errmsg) {
                   errmsg->Form("the target member (%s) is unknown",str->GetString().Data());
+                  bool f = !fClass->GetDataMember( str->GetString() ) && !fClass->GetBaseClass( str->GetString() );
                }
                return kFALSE;
             } else {

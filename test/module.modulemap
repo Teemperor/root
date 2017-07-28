@@ -1,0 +1,5 @@
+module Event { header "Event.h" export * }
+module Aclock { header "Aclock.h" export * }
+module Hello { header "Hello.h" export * }
+module TBench { header "TBench.h" export * }
+module TrackMathCoreDict { header "TrackMathCore.h" export * }

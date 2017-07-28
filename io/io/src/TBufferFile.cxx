@@ -2756,7 +2756,7 @@ TClass *TBufferFile::ReadClass(const TClass *clReq, UInt_t *objTag)
         !(clReq->GetSchemaRules() &&
           clReq->GetSchemaRules()->HasRuleWithSourceClass(cl->GetName()) )
         ) ) {
-      Error("ReadClass", "got wrong class: %s", cl->GetName());
+      Error("ReadClass", "got wrong class: %s instead of %s", cl->GetName(), clReq->GetName());
       // exception
    }
 
