@@ -361,7 +361,7 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
     endforeach()
   endif()
 
-  if(runtime_cxxmodules)
+  if(runtime_cxxmodules AND ARG_MODULE)
     set(runtime_cxxmodules_env "ROOT_MODULES=1")
   endif()
   #---what rootcling command to use--------------------------
