@@ -301,7 +301,7 @@ namespace cling {
     if (CompilerInstance* CI = getCIOrNull()) {
       // The "bridge" between the interpreters.
       ExternalInterpreterSource *myExternalSource =
-        new ExternalInterpreterSource(&parentInterpreter, this);
+        new ExternalInterpreterSource(&parentInterpreter, this, CI->getASTContext().ExternalSource);
 
       llvm::IntrusiveRefCntPtr <ExternalASTSource>
         astContextExternalSource(myExternalSource);

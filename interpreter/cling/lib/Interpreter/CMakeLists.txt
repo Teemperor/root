@@ -63,6 +63,7 @@ add_cling_library(clingInterpreter OBJECT
   InterpreterCallbacks.cpp
   InvocationOptions.cpp
   LookupHelper.cpp
+  MultiplexExternalASTSource.cpp
   NullDerefProtectionTransformer.cpp
   RequiredSymbols.cpp
   Transaction.cpp

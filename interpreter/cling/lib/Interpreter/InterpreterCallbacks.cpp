@@ -16,6 +16,7 @@
 #include "clang/Frontend/MultiplexConsumer.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/CodeCompleteConsumer.h"
+#include "MultiplexExternalASTSource.h"
 #include "clang/Sema/Sema.h"
 #include "clang/Serialization/ASTDeserializationListener.h"
 #include "clang/Serialization/ASTReader.h"
@@ -179,10 +180,7 @@ namespace cling {
     Sema& SemaRef = interp->getSema();
     ASTReader* Reader = m_Interpreter->getCI()->getModuleManager().get();
     ExternalSemaSource* externalSemaSrc = SemaRef.getExternalSource();
-    // Disable the ROOT external sema source when we have modules. In the
-    // modules case the module manager is taking it's place and we don't want
-    // to overwrite it.
-    if (!SemaRef.getLangOpts().Modules && enableExternalSemaSourceCallbacks)
+    if (enableExternalSemaSourceCallbacks) {
       if (!externalSemaSrc || externalSemaSrc == Reader) {
         // If the ExternalSemaSource is the PCH reader we still need to insert
         // our listener.
@@ -191,13 +189,15 @@ namespace cling {
         m_Interpreter->getSema().addExternalSource(m_ExternalSemaSource);
 
         // FIXME: We should add a multiplexer in the ASTContext, too.
-        llvm::IntrusiveRefCntPtr<ExternalASTSource>
+        llvm::IntrusiveRefCntPtr<ExternalSemaSource>
           astContextExternalSource(SemaRef.getExternalSource());
         clang::ASTContext& Ctx = SemaRef.getASTContext();
+        MultiplexExternalASTSource* EAS = new MultiplexExternalASTSource(*Ctx.ExternalSource, *astContextExternalSource);
         // FIXME: This is a gross hack. We must make multiplexer in the
         // astcontext or a derived class that extends what we need.
         Ctx.ExternalSource.resetWithoutRelease();//FIXME: make sure we delete it.
-        Ctx.setExternalSource(astContextExternalSource);
+        Ctx.setExternalSource(EAS);
+      }
     }
 
     if (enableDeserializationListenerCallbacks && Reader) {

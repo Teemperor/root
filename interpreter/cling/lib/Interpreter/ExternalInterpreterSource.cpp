@@ -67,9 +67,8 @@ namespace {
 
 namespace cling {
 
-  ExternalInterpreterSource::ExternalInterpreterSource(
-        const cling::Interpreter *parent, cling::Interpreter *child) :
-        m_ParentInterpreter(parent), m_ChildInterpreter(child) {
+  ExternalInterpreterSource::ExternalInterpreterSource(const cling::Interpreter *parent, cling::Interpreter *child, llvm::IntrusiveRefCntPtr<ExternalASTSource> fallback) :
+        m_ParentInterpreter(parent), m_ChildInterpreter(child), m_Fallback(fallback) {
 
     clang::DeclContext *parentTUDeclContext =
       m_ParentInterpreter->getCI()->getASTContext().getTranslationUnitDecl();
