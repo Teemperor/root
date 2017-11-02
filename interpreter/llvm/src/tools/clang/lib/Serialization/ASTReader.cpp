@@ -1873,7 +1873,7 @@ void ASTReader::markIdentifierUpToDate(IdentifierInfo *II) {
 
   // Update the generation for this identifier.
   if (getContext().getLangOpts().Modules)
-    IdentifierGeneration[II] = getGeneration();
+    IdentifierGeneration[II] = getGeneration(getContext());
 }
 
 void ASTReader::resolvePendingMacro(IdentifierInfo *II,
@@ -3964,7 +3964,7 @@ ASTReader::ReadASTCore(StringRef FileName,
   std::string ErrorStr;
   ModuleManager::AddModuleResult AddResult
     = ModuleMgr.addModule(FileName, Type, ImportLoc, ImportedBy,
-                          getGeneration(), ExpectedSize, ExpectedModTime,
+                          getGeneration(getContext()), ExpectedSize, ExpectedModTime,
                           ExpectedSignature, readASTFileSignature,
                           M, ErrorStr);
 
@@ -7744,7 +7744,7 @@ void ASTReader::ReadMethodPool(Selector Sel) {
   // Get the selector generation and update it to the current generation.
   unsigned &Generation = SelectorGeneration[Sel];
   unsigned PriorGeneration = Generation;
-  Generation = getGeneration();
+  Generation = getGeneration(getContext());
   SelectorOutOfDate[Sel] = false;
 
   // Search for methods defined with this selector.
