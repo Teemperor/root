@@ -1913,11 +1913,11 @@ void TCling::RegisterModule(const char* modulename,
 
    clang::Sema &TheSema = fInterpreter->getSema();
 
+   bool ModuleWasSuccessfullyLoaded = false;
    if (TheSema.getLangOpts().Modules) {
-     std::string ModuleName = llvm::StringRef(modulename).substr(3).str();
-     bool success = LoadModule(ModuleName, *fInterpreter);
-     if (!success)
-        Info("TCling::RegisterModule", "Failed to load module %s", ModuleName.c_str());
+      std::string ModuleName = llvm::StringRef(modulename).substr(3).str();
+      ModuleWasSuccessfullyLoaded = LoadModule(ModuleName, *fInterpreter);
+      if (!ModuleWasSuccessfullyLoaded) {
    }
 
    { // scope within which diagnostics are de-activated
@@ -1932,7 +1932,7 @@ void TCling::RegisterModule(const char* modulename,
 #endif
 #endif
 
-      if (!hasHeaderParsingOnDemand){
+      if (!ModuleWasSuccessfullyLoaded && !hasHeaderParsingOnDemand){
          SuspendAutoParsing autoParseRaii(this);
 
          const cling::Transaction* watermark = fInterpreter->getLastTransaction();
@@ -1955,7 +1955,7 @@ void TCling::RegisterModule(const char* modulename,
    // make sure to 'reset' the TClass that have a class init in this module
    // but already had their type information available (using information/header
    // loaded from other modules or from class rules).
-   if (!hasHeaderParsingOnDemand) {
+   if (!ModuleWasSuccessfullyLoaded && !hasHeaderParsingOnDemand) {
       // This code is likely to be superseded by the similar code in LoadPCM,
       // and have been disabled, (inadvertently or awkwardly) by
       // commit 7903f09f3beea69e82ffba29f59fb2d656a4fd54 (Refactor the routines used for header parsing on demand)
@@ -1982,7 +1982,7 @@ void TCling::RegisterModule(const char* modulename,
    if (fClingCallbacks)
      SetClassAutoloading(oldValue);
 
-   if (!hasHeaderParsingOnDemand) {
+   if (!ModuleWasSuccessfullyLoaded && !hasHeaderParsingOnDemand) {
       // __ROOTCLING__ might be pulled in through PCH
       fInterpreter->declare("#ifdef __ROOTCLING__\n"
                             "#undef __ROOTCLING__\n"
