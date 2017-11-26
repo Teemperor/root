@@ -1134,9 +1134,22 @@ static void LoadCoreModules(cling::Interpreter &interp)
 
    if (!LoadModule(moduleMap.findModule("Core")->Name, interp))
       Error("TCling::LoadCodeModule", "Cannot load module Core");
+   else {
+      // If we loaded module Core we need to #define gROOT again because modules do not leak macros.
+      // FIXME: Try moving that in Core.TROOT.h (config_macros [exhaustive] gROOT)
+      interp.declare("#define gROOT (ROOT::GetROOT())");
+      interp.declare("#define gDirectory (TDirectory::CurrentDirectory())");
+      interp.declare("#define gGLManager (TGLManager::Instance())");
+      interp.declare("#define gVirtualX (TVirtualX::Instance())");
+      interp.declare("#define gPad (TVirtualPad::Pad())");
+      interp.declare("#define gPerfStats (TVirtualPerfStats::CurrentPerfStats())");
+      interp.declare("#define gInterpreter (TInterpreter::Instance())");
+   }
 
    if (!LoadModule(moduleMap.findModule("RIO")->Name, interp))
       Error("TCling::LoadCodeModule", "Cannot load module RIO");
+   else
+     interp.declare("#define gFile (TFile::CurrentFile())");
 }
 
 static bool FileExists(const char *file)
