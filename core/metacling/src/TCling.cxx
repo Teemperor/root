@@ -92,6 +92,7 @@ clang/LLVM technology.
 #include "clang/Lex/PreprocessorOptions.h"
 #include "clang/Sema/Lookup.h"
 #include "clang/Sema/Sema.h"
+#include "clang/Serialization/ASTReader.h"
 #include "clang/Parse/Parser.h"
 
 #include "cling/Interpreter/ClangInternalState.h"
@@ -1104,7 +1105,22 @@ static bool LoadModule(const std::string &ModuleName, cling::Interpreter &interp
    cling::Interpreter::PushTransactionRAII RAII(&interp);
    if (clang::Module *M = moduleMap.findModule(ModuleName)) {
       clang::IdentifierInfo *II = PP.getIdentifierInfo(M->Name);
-      return !CI.getSema().ActOnModuleImport(ValidLoc, ValidLoc, std::make_pair(II, ValidLoc)).isInvalid();
+      auto ModMan = CI.getModuleManager();
+      bool success = !CI.getSema().ActOnModuleImport(ValidLoc, ValidLoc, std::make_pair(II, ValidLoc)).isInvalid();
+      // Make the entire submodule tree visible.
+      // FIXME: That would cause problems with some stl implementations.
+      SmallVector<Module *, 64> Stack;
+      Stack.push_back(M);
+      while (!Stack.empty()) {
+         Module *Current = Stack.pop_back_val();
+         if (Current->IsMissingRequirement)
+            continue;
+         ModMan->makeModuleVisible(Current, clang::Module::AllVisible, ValidLoc);
+         Stack.insert(Stack.end(),
+                      Current->submodule_begin(), Current->submodule_end());
+      }
+
+      return success;
    }
    return false;
 }
