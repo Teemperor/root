@@ -366,7 +366,11 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
     endforeach()
   endif()
 
-  if(runtime_cxxmodules AND ARG_MODULE)
+  # Activated C++ modules if we have a value for `MODULE`.
+  # If we build a multidict, we only have one C++ module so
+  # we don't generate a second one.
+  set(runtime_cxxmodules_env)
+  if(runtime_cxxmodules AND ARG_MODULE AND NOT ARG_MULTIDICT)
     # FIXME: Once modules work better, we should use some other value like "1"
     # to disable the module-build remarks from clang.
     set(runtime_cxxmodules_env "ROOT_MODULES=DEBUG")
