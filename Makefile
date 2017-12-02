@@ -898,11 +898,9 @@ include/module.modulemap:
 COREDICTH_REL := $(BASEH_REL) $(CONTH_REL) $(METAH_REL) $(CLINGUTILSH_REL)
 COREDICTH_REL := $(patsubst include/%,%, $(COREDICTH_REL))
 CXXMODULES_CORE_EXCLUDE := RConfig.h RVersion.h  RtypesImp.h \
-			   Rtypes.h RtypesCore.h TClassEdit.h TClingUtils.h \
-			   DllImport.h TGenericClassInfo.h \
-			   TSchemaHelper.h ESTLType.h RStringView.h Varargs.h \
-			   RootMetaSelection.h libcpp_string_view.h \
-			   RWrap_libcpp_string_view.h \
+			   Rtypes.h RtypesCore.h TClassEdit.h \
+			   DllImport.h ESTLType.h RStringView.h Varargs.h \
+			   libcpp_string_view.h RWrap_libcpp_string_view.h \
 			   TException.h TBranchProxyTemplate.h \
 			   TGLIncludes.h TGLWSIncludes.h snprintf.h strlcpy.h
 COREDICTH_REL := $(filter-out $(CXXMODULES_CORE_EXCLUDE),$(COREDICTH_REL))
