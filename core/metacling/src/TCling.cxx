@@ -555,15 +555,16 @@ void TCling::HandleNewDecl(const void* DV, bool isDeserialized, std::set<TClass*
       // scope.
       if (!(isa<VarDecl>(ND)))
          return;
-
+      auto ListOfGlobals = static_cast<TListOfDataMembers*>(gROOT->GetListOfGlobals());
+      const VarDecl *CanonVD = cast<VarDecl>(ND)->getCanonicalDecl();
       // Skip if already in the list.
-      if (gROOT->GetListOfGlobals()->FindObject(ND->getNameAsString().c_str()))
+      if (ListOfGlobals->Find(static_cast<DeclId_t>(CanonVD)))
          return;
 
       // Put the global constants and global enums in the corresponding lists.
       gROOT->GetListOfGlobals()->Add(new TGlobal((DataMemberInfo_t *)
-                                                new TClingDataMemberInfo(fInterpreter,
-                                                                        cast<ValueDecl>(ND), 0)));
+                                                 new TClingDataMemberInfo(fInterpreter,
+                                                                          CanonVD, 0)));
    }
 }
 
