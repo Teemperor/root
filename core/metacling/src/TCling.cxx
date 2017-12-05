@@ -4155,7 +4155,21 @@ TInterpreter::DeclId_t TCling::GetDataMember(ClassInfo_t *opaque_cl, const char 
       }
       return d;
    }
-   return cling::utils::Lookup::Named(&fInterpreter->getSema(), name);
+   // We are looking up for something on the TU scope.
+   // FIXME: We do not want to go through TClingClassInfo(fInterpreter) because of redundant deserializations. That
+   // interface will actually construct iterators and walk over the decls on the global scope. In would return the first
+   // occurrence of a decl with the looked up name. However, that's not what C++ lookup would do: if we want to switch
+   // to a more complete C++ lookup interface we need to ignore using directives such as
+   // 'using namespace cling::runtime'. If we did not we will find two gCling 'global' variables here.
+   NamedDecl *GD = cling::utils::Lookup::Named(&fInterpreter->getSema(), name);
+   if (GD && GD != (NamedDecl*) -1)
+      return GD;
+
+   // cling::utils::Lookup::Named returns -1 if the lookup was ambiguous.
+   // FIXME: We should rethink what would be the right semantics here. For now, ignore using directives to keep the old
+   // behavior.
+   std::string globalName = std::string("::") + name;
+   return cling::utils::Lookup::Named(&fInterpreter->getSema(), globalName);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
