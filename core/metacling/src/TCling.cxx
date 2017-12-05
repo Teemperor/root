@@ -4154,12 +4154,9 @@ TInterpreter::DeclId_t TCling::GetDataMember(ClassInfo_t *opaque_cl, const char 
          bool hasIoName = ROOT::TMetaUtils::ExtractAttrPropertyFromName(*decl,"ioname",ioName);
          if (hasIoName && ioName != name) return 0;
       }
+      return d;
    }
-   else {
-      TClingClassInfo gcl(fInterpreter);
-      d = gcl.GetDataMember(name);
-   }
-   return d;
+   return cling::utils::Lookup::Named(&fInterpreter->getSema(), name);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
