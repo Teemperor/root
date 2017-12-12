@@ -14,6 +14,9 @@ ROOT_GLOB_HEADERS(Base_dict_headers ${CMAKE_CURRENT_SOURCE_DIR}/inc/LinkDef?.h
                                     ${CMAKE_CURRENT_SOURCE_DIR}/inc/MessageTypes.h
                                     ${CMAKE_CURRENT_SOURCE_DIR}/inc/KeySymbols.h
                                     ${CMAKE_CURRENT_SOURCE_DIR}/inc/Buttons.h)
+
+#list(REMOVE_ITEM Base_dict_headers "${CMAKE_CURRENT_SOURCE_DIR}/inc/TVersionCheck.h")
+
 if(root7)
     set(root7src v7/src/*.cxx)
     ROOT_GLOB_HEADERS(Base_v7_dict_headers ${CMAKE_CURRENT_SOURCE_DIR}/v7/inc/ROOT/T*.hxx)
