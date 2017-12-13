@@ -4160,6 +4160,7 @@ int RootClingMain(int argc,
    bool writeEmptyRootPCM = false;
    bool selSyntaxOnly = false;
    bool noIncludePaths = false;
+   bool cxxmodule = getenv("ROOT_MODULES") != nullptr;
 
    // Collect the diagnostic pragmas linked to the usage of -W
    // Workaround for ROOT-5656
@@ -4180,6 +4181,12 @@ int RootClingMain(int argc,
             // name for the rootmap file
             rootmapFileName = argv[ic + 1];
             ic += 2;
+            continue;
+         }
+
+         if (strcmp("-cxxmodule", argv[ic]) == 0) {
+            cxxmodule = true;
+            ic += 1;
             continue;
          }
 
@@ -4360,7 +4367,7 @@ int RootClingMain(int argc,
       sharedLibraryPathName = dictpathname;
    }
 
-   if (!isPCH && getenv("ROOT_MODULES")) {
+   if (!isPCH && cxxmodule) {
       // We just pass -fmodules, the CIFactory will do the rest and configure
       // clang correctly once it sees this flag.
       clingArgsInterpreter.push_back("-fmodules");
@@ -5048,7 +5055,7 @@ int RootClingMain(int argc,
          // Write the module/PCH depending on what mode we are on
          if (modGen.IsPCH()) {
             if (!GenerateAllDict(modGen, CI, currentDirectory)) return 1;
-         } else if (getenv("ROOT_MODULES")) {
+         } else if (cxxmodule) {
             if (!GenerateModule(modGen, resourceDir, interp, linkdefFilename, moduleName.str()))
                return 1;
          }
