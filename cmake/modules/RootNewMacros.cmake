@@ -366,7 +366,7 @@ function(ROOT_GENERATE_DICTIONARY dictionary)
     endforeach()
   endif()
 
-  if(runtime_cxxmodules AND ARG_MODULE)
+  if(runtime_cxxmodules AND ARG_MODULE AND NOT ARG_MULTIDICT)
     set(newargs -cxxmodule ${newargs})
   endif()
 
