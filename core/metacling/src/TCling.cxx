@@ -5087,6 +5087,17 @@ Int_t TCling::LoadLibraryMap(const char* rootmapfile)
             }
          }
          if (!skip) {
+            // Load the modulemap from the dir and add it to the prebuilt module
+            // path.
+            fInterpreter->getCI()->getHeaderSearchOpts().AddPrebuiltModulePath(d.Data());
+            auto& hdrSearch = fInterpreter->getCI()->getPreprocessor().getHeaderSearchInfo();
+            SmallString<128> ModuleMapFilePath = StringRef(d.Data());
+            llvm::sys::path::append(ModuleMapFilePath, "module.modulemap");
+
+            if (auto file = hdrSearch.getFileMgr().getFile(ModuleMapFilePath)) {
+               hdrSearch.loadModuleMapFile(file, false, FileID());
+            }
+
             void* dirp = gSystem->OpenDirectory(d);
             if (dirp) {
                if (gDebug > 3) {
