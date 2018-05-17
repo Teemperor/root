@@ -246,8 +246,11 @@ if (NOT WIN32 AND NOT libcxx)
 
     configure_file(${CMAKE_SOURCE_DIR}/build/unix/stl.modulemap ${CMAKE_BINARY_DIR}/include/stl.modulemap)
     install(FILES "${CMAKE_BINARY_DIR}/include/stl.modulemap" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT headers)
+    install(FILES "${CMAKE_BINARY_DIR}/lib/stl.pcm" DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libraries)
+
     configure_file(${CMAKE_SOURCE_DIR}/build/unix/libc.modulemap ${CMAKE_BINARY_DIR}/include/libc.modulemap)
     install(FILES "${CMAKE_BINARY_DIR}/include/libc.modulemap" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT headers)
+    install(FILES "${CMAKE_BINARY_DIR}/lib/libc.pcm" DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT libraries)
 
   else()
     message(SEND_ERROR "Couldn't find c++ library paths, no modulemap overlay will be installed! (__libcpp_full_paths = '${__libcpp_full_paths}')")
