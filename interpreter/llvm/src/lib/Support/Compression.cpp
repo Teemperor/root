@@ -55,7 +55,7 @@ static StringRef convertZlibCodeToString(int Code) {
   }
 }
 
-bool zlib::isAvailable() { return true; }
+bool zlib::isAvailable() { return false; }
 
 Error zlib::compress(StringRef InputBuffer,
                      SmallVectorImpl<char> &CompressedBuffer,
